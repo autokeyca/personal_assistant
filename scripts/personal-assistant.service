@@ -1,0 +1,21 @@
+[Unit]
+Description=Personal Assistant Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ja
+WorkingDirectory=/home/ja/projects/personal_assistant
+ExecStart=/home/ja/projects/personal_assistant/venv/bin/python /home/ja/projects/personal_assistant/run.py
+Restart=always
+RestartSec=10
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+# Logging
+StandardOutput=append:/home/ja/projects/personal_assistant/logs/assistant.log
+StandardError=append:/home/ja/projects/personal_assistant/logs/assistant.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,44 @@
+# Personal Assistant Configuration
+# Copy this to config.yaml and fill in your values
+
+telegram:
+  bot_token: "YOUR_BOT_TOKEN_FROM_BOTFATHER"
+  # Your Telegram user ID (for authorization)
+  # Get it by messaging @userinfobot on Telegram
+  authorized_user_id: 123456789
+
+google:
+  # Path to your OAuth2 credentials JSON file
+  # Download from Google Cloud Console
+  credentials_file: "config/credentials.json"
+  # Token file will be created after first auth
+  token_file: "config/token.json"
+
+  # Scopes for Google APIs
+  scopes:
+    - "https://www.googleapis.com/auth/calendar"
+    - "https://www.googleapis.com/auth/gmail.modify"
+    - "https://www.googleapis.com/auth/gmail.send"
+    - "https://www.googleapis.com/auth/gmail.readonly"
+
+gemini:
+  # Gemini API key from Google AI Studio (https://aistudio.google.com/apikey)
+  api_key: "YOUR_GEMINI_API_KEY"
+  # Model to use (gemini-2.5-flash, gemini-2.5-flash-preview-09-2025)
+  model: "gemini-2.5-flash"
+
+database:
+  # SQLite database path
+  path: "data/assistant.db"
+
+scheduler:
+  # Check for reminders every N minutes
+  reminder_check_interval: 1
+  # Check for new emails every N minutes
+  email_check_interval: 5
+  # Morning briefing time (HH:MM in 24h format)
+  morning_briefing_time: "08:00"
+
+logging:
+  level: "INFO"
+  file: "logs/assistant.log"
