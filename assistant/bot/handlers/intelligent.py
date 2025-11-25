@@ -234,7 +234,7 @@ async def process_natural_language(
         logger.info(f"User {user['full_name']} - Parsed intent: {intent}, confidence: {confidence}, entities: {entities}")
 
         # Check if this is a task intent that requires authorization
-        task_intents = ['todo_add', 'todo_complete', 'todo_delete', 'calendar_add', 'reminder_add', 'email_send']
+        task_intents = ['todo_add', 'todo_complete', 'todo_delete', 'calendar_add', 'reminder_add', 'email_send', 'telegram_message']
 
         if intent in task_intents and not user['is_owner'] and not user['is_authorized']:
             # Non-authorized user trying to execute a task - request approval
@@ -273,6 +273,9 @@ async def process_natural_language(
 
         elif intent == 'email_send':
             await handle_email_send(update, context, entities, message, existing_message, user)
+
+        elif intent == 'telegram_message':
+            await handle_telegram_message(update, context, entities, message, existing_message, user)
 
         elif intent == 'general_chat':
             await handle_general_chat(update, context, message, existing_message, user, conversation_history)
@@ -536,6 +539,73 @@ async def handle_email_send(update, context, entities, original_message, existin
     except Exception as e:
         logger.error(f"Error sending email: {e}")
         response = f"❌ Failed to send email: {str(e)}"
+
+    if existing_message:
+        await existing_message.edit_text(response)
+    else:
+        await update.message.reply_text(response)
+
+    # Save response to conversation history
+    if user:
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+
+async def handle_telegram_message(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle sending a Telegram message to another user."""
+    user_service = UserService()
+
+    recipient_name = entities.get('recipient')
+    message_body = entities.get('body') or entities.get('description') or original_message
+
+    # Validate we have the minimum required info
+    if not recipient_name:
+        response = "❌ I need a recipient name to send a message.\nTry: 'Send John a message to call me back'"
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    # Search for the recipient in known users
+    all_users = user_service.get_all_users()
+    recipient = None
+
+    # Try to find recipient by first name, last name, or username
+    recipient_name_lower = recipient_name.lower()
+    for u in all_users:
+        if (u['first_name'] and recipient_name_lower in u['first_name'].lower()) or \
+           (u['last_name'] and recipient_name_lower in u['last_name'].lower()) or \
+           (u['username'] and recipient_name_lower in u['username'].lower()):
+            recipient = u
+            break
+
+    if not recipient:
+        response = f"❌ I don't know anyone named '{recipient_name}'. They need to start a conversation with me first."
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    try:
+        # Send the Telegram message to the recipient
+        sender_name = user['full_name'] if user else "Someone"
+        message_text = f"📨 Message from {sender_name}:\n\n{message_body}"
+
+        await context.bot.send_message(
+            chat_id=recipient['telegram_id'],
+            text=message_text
+        )
+
+        response = f"✅ Message sent to {recipient['first_name']}"
+
+    except Exception as e:
+        logger.error(f"Error sending Telegram message: {e}")
+        response = f"❌ Failed to send message: {str(e)}"
 
     if existing_message:
         await existing_message.edit_text(response)

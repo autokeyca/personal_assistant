@@ -66,16 +66,16 @@ class LLMService:
             prompt = f"""Parse this message and extract the intent and entities.
 Return ONLY a JSON object with this structure:
 {{
-    "intent": "one of: todo_add, todo_list, todo_complete, todo_delete, calendar_add, calendar_list, reminder_add, email_send, email_check, help, general_chat",
+    "intent": "one of: todo_add, todo_list, todo_complete, todo_delete, calendar_add, calendar_list, reminder_add, telegram_message, email_send, email_check, help, general_chat",
     "entities": {{
         "title": "extracted title/subject",
-        "description": "extracted description or email body",
+        "description": "extracted description or message content",
         "date": "extracted date in YYYY-MM-DD format",
         "time": "extracted time in HH:MM format",
         "priority": "high/medium/low if mentioned",
-        "recipient": "email recipient address or name",
+        "recipient": "recipient name or identifier",
         "subject": "email subject line if mentioned",
-        "body": "email body/message content",
+        "body": "message body/content",
         "duration": "event duration if mentioned"
     }},
     "confidence": 0.95
@@ -88,7 +88,8 @@ Important:
 - Use null for missing entities
 - For dates, interpret "tomorrow", "next week", etc. relative to today
 - For times, use 24-hour format
-- For email_send: extract recipient (email or name), subject, and body
+- CRITICAL: Use "telegram_message" for sending Telegram messages (e.g., "send X a message", "tell Y that...", "message Z")
+- CRITICAL: Use "email_send" ONLY when explicitly mentioning "email" or when recipient is an email address
 - If the message is conversational/chat, use "general_chat" intent
 """
 
