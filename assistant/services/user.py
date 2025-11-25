@@ -126,7 +126,7 @@ class UserService:
             logger.info(f"Revoked authorization: {user.full_name} (ID: {telegram_id})")
             return True
 
-    def add_conversation(self, telegram_id: int, role: str, message: str):
+    def add_conversation(self, telegram_id: int, role: str, message: str, channel: str = None):
         """
         Add a message to conversation history.
 
@@ -134,12 +134,14 @@ class UserService:
             telegram_id: Telegram user ID
             role: 'user' or 'assistant'
             message: The message content
+            channel: 'telegram', 'email', or None
         """
         with get_session() as session:
             conversation = ConversationHistory(
                 user_id=telegram_id,
                 role=role,
-                message=message
+                message=message,
+                channel=channel
             )
             session.add(conversation)
             session.commit()

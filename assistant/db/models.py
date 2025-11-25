@@ -143,6 +143,7 @@ class ConversationHistory(Base):
     user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
     role = Column(String(20), nullable=False)  # 'user' or 'assistant'
     message = Column(Text, nullable=False)
+    channel = Column(String(20), nullable=True)  # 'telegram', 'email', or None
     timestamp = Column(DateTime, default=datetime.utcnow)
 
     # Relationship to user
@@ -157,6 +158,7 @@ class ConversationHistory(Base):
             "user_id": self.user_id,
             "role": self.role,
             "message": self.message,
+            "channel": self.channel,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
         }
 

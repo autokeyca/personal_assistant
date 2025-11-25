@@ -46,7 +46,7 @@ class LLMService:
             logger.error(f"Error processing message: {e}")
             return f"Sorry, I encountered an error: {str(e)}"
 
-    def parse_command(self, message: str) -> Dict[str, Any]:
+    def parse_command(self, message: str, conversation_context: list = None) -> Dict[str, Any]:
         """
         Parse a natural language message into a structured command.
 
@@ -63,7 +63,18 @@ class LLMService:
             }
         """
         try:
+            # Build context from recent conversation
+            context_str = ""
+            if conversation_context:
+                context_str = "\n\nRecent conversation context:\n"
+                for conv in conversation_context[-3:]:  # Last 3 messages
+                    role = conv.get('role', 'unknown')
+                    msg = conv.get('message', '')
+                    channel = conv.get('channel', 'unknown')
+                    context_str += f"- {role} ({channel}): {msg[:100]}\n"
+
             prompt = f"""Parse this message and extract the intent and entities.
+{context_str}
 Return ONLY a JSON object with this structure:
 {{
     "intent": "one of: todo_add, todo_list, todo_complete, todo_delete, calendar_add, calendar_list, reminder_add, telegram_message, email_send, email_check, help, general_chat",
@@ -90,6 +101,10 @@ Important:
 - For times, use 24-hour format
 - CRITICAL: Use "telegram_message" for sending Telegram messages (e.g., "send X a message", "tell Y that...", "message Z")
 - CRITICAL: Use "email_send" ONLY when explicitly mentioning "email" or when recipient is an email address
+- CRITICAL: When user says "respond" without specifying channel, look at the conversation context:
+  - If last message was via telegram channel → use "telegram_message"
+  - If last message was via email channel → use "email_send"
+  - Use the sender's name from context as the recipient
 - If the message is conversational/chat, use "general_chat" intent
 """
 

@@ -114,7 +114,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # Add to conversation history
-        user_service.add_conversation(user['telegram_id'], "user", transcribed_text)
+        user_service.add_conversation(user['telegram_id'], "user", transcribed_text, channel="telegram")
 
         # Show transcription
         await processing_msg.edit_text(f"📝 Transcribed: \"{transcribed_text}\"\n\nProcessing...")
@@ -142,7 +142,7 @@ async def handle_intelligent_message(update: Update, context: ContextTypes.DEFAU
         message_text = update.message.text
 
         # Add to conversation history
-        user_service.add_conversation(user['telegram_id'], "user", message_text)
+        user_service.add_conversation(user['telegram_id'], "user", message_text, channel="telegram")
 
         await process_natural_language(update, context, message_text, None, user)
 
@@ -226,7 +226,7 @@ async def process_natural_language(
         conversation_history = user_service.get_conversation_history(user['telegram_id'], limit=10, hours=24)
 
         # Parse the message to extract intent and entities
-        parsed = llm.parse_command(message)
+        parsed = llm.parse_command(message, conversation_context=conversation_history)
         intent = parsed.get('intent')
         entities = parsed.get('entities', {})
         confidence = parsed.get('confidence', 0.0)
@@ -612,8 +612,16 @@ async def handle_telegram_message(update, context, entities, original_message, e
         return
 
     try:
-        # Send the Telegram message to the recipient
+        # Store the message in recipient's conversation history (incoming message)
         sender_name = user['full_name'] if user else "Someone"
+        user_service.add_conversation(
+            recipient['telegram_id'],
+            "user",
+            f"[Message from {sender_name}] {message_body}",
+            channel="telegram"
+        )
+
+        # Send the Telegram message to the recipient
         message_text = f"📨 Message from {sender_name}:\n\n{message_body}"
 
         await context.bot.send_message(
