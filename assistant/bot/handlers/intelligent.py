@@ -234,7 +234,8 @@ async def process_natural_language(
         logger.info(f"User {user['full_name']} - Parsed intent: {intent}, confidence: {confidence}, entities: {entities}")
 
         # Check if this is a task intent that requires authorization
-        task_intents = ['todo_add', 'todo_complete', 'todo_delete', 'calendar_add', 'reminder_add', 'email_send', 'telegram_message']
+        # Note: telegram_message is NOT in this list - messages are relayed directly
+        task_intents = ['todo_add', 'todo_complete', 'todo_delete', 'calendar_add', 'reminder_add', 'email_send']
 
         if intent in task_intents and not user['is_owner'] and not user['is_authorized']:
             # Non-authorized user trying to execute a task - request approval
@@ -242,7 +243,8 @@ async def process_natural_language(
             return
 
         # If not owner but asking a question or having general chat, pass message to owner
-        if not user['is_owner'] and intent not in task_intents and intent != 'general_chat':
+        # Note: telegram_message is handled by its own handler, not forwarded
+        if not user['is_owner'] and intent not in task_intents and intent not in ['general_chat', 'telegram_message']:
             await forward_message_to_owner(update, user, message)
             response = f"I've forwarded your request to my owner. They will respond shortly."
             if existing_message:
