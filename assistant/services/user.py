@@ -17,7 +17,7 @@ class UserService:
     def __init__(self):
         self.owner_id = get("telegram.authorized_user_id")
 
-    def get_or_create_user(self, telegram_user: TelegramUser) -> User:
+    def get_or_create_user(self, telegram_user: TelegramUser):
         """
         Get existing user or create new one from Telegram user object.
 
@@ -25,7 +25,7 @@ class UserService:
             telegram_user: Telegram User object from update
 
         Returns:
-            User database object
+            Tuple of (user_dict, is_new)
         """
         with get_session() as session:
             user = session.query(User).filter_by(telegram_id=telegram_user.id).first()
@@ -43,7 +43,7 @@ class UserService:
                     is_authorized=is_owner,  # Owner is always authorized
                 )
                 session.add(user)
-                logger.info(f"Created new user: {user.full_name} (ID: {telegram_user.id})")
+                logger.info(f"Created new user: {telegram_user.first_name} (ID: {telegram_user.id})")
             else:
                 # Update user info in case it changed
                 user.first_name = telegram_user.first_name
@@ -52,9 +52,19 @@ class UserService:
                 user.last_seen = datetime.utcnow()
 
             session.commit()
-            session.refresh(user)
 
-            return user, is_new
+            # Convert to dict to avoid session issues
+            user_data = {
+                'telegram_id': user.telegram_id,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'username': user.username,
+                'is_owner': user.is_owner,
+                'is_authorized': user.is_authorized,
+                'full_name': user.full_name
+            }
+
+            return user_data, is_new
 
     def is_owner(self, telegram_id: int) -> bool:
         """Check if user is the owner."""

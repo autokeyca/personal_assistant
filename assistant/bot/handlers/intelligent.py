@@ -40,7 +40,7 @@ async def send_introduction(update: Update, user):
     user_service = UserService()
     owner_id = get("telegram.authorized_user_id")
 
-    if user.is_owner:
+    if user['is_owner']:
         # Introduction for owner
         intro = f"""Good day! I'm {BOT_NAME}, your personal assistant.
 
@@ -63,12 +63,12 @@ How may I assist you?"""
     await update.message.reply_text(intro)
 
     # If not owner, notify owner about new contact
-    if not user.is_owner:
-        owner_notification = f"""📬 New contact: {user.full_name}
+    if not user['is_owner']:
+        owner_notification = f"""📬 New contact: {user['full_name']}
 
-{user.full_name} has started a conversation with {BOT_NAME}.
-User ID: {user.telegram_id}
-Username: @{user.username if user.username else 'N/A'}"""
+{user['full_name']} has started a conversation with {BOT_NAME}.
+User ID: {user['telegram_id']}
+Username: @{user['username'] if user['username'] else 'N/A'}"""
 
         try:
             await update.get_bot().send_message(chat_id=owner_id, text=owner_notification)
@@ -114,7 +114,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # Add to conversation history
-        user_service.add_conversation(user.telegram_id, "user", transcribed_text)
+        user_service.add_conversation(user['telegram_id'], "user", transcribed_text)
 
         # Show transcription
         await processing_msg.edit_text(f"📝 Transcribed: \"{transcribed_text}\"\n\nProcessing...")
@@ -142,7 +142,7 @@ async def handle_intelligent_message(update: Update, context: ContextTypes.DEFAU
         message_text = update.message.text
 
         # Add to conversation history
-        user_service.add_conversation(user.telegram_id, "user", message_text)
+        user_service.add_conversation(user['telegram_id'], "user", message_text)
 
         await process_natural_language(update, context, message_text, None, user)
 
@@ -158,7 +158,7 @@ async def request_owner_approval(update: Update, context: ContextTypes.DEFAULT_T
 
     # Create pending approval
     approval_id = user_service.create_approval_request(
-        requester_id=user.telegram_id,
+        requester_id=user['telegram_id'],
         request_message=message,
         intent=intent,
         entities=json.dumps(entities) if entities else None
@@ -171,12 +171,12 @@ async def request_owner_approval(update: Update, context: ContextTypes.DEFAULT_T
     else:
         await update.message.reply_text(response)
 
-    user_service.add_conversation(user.telegram_id, "assistant", response)
+    user_service.add_conversation(user['telegram_id'], "assistant", response)
 
     # Notify owner
     owner_message = f"""🔔 Task Approval Request #{approval_id}
 
-From: {user.full_name} (@{user.username if user.username else 'no username'})
+From: {user['full_name']} (@{user['username'] if user['username'] else 'no username'})
 Request: {message}
 
 Intent: {intent}
@@ -196,13 +196,13 @@ async def forward_message_to_owner(update: Update, user, message: str):
     """Forward a message from non-owner user to the owner."""
     owner_id = get("telegram.authorized_user_id")
 
-    forward_text = f"""📨 Message from {user.full_name}:
+    forward_text = f"""📨 Message from {user['full_name']}:
 
 {message}
 
 ---
-User ID: {user.telegram_id}
-Username: @{user.username if user.username else 'N/A'}"""
+User ID: {user['telegram_id']}
+Username: @{user['username'] if user['username'] else 'N/A'}"""
 
     try:
         await update.get_bot().send_message(chat_id=owner_id, text=forward_text)
@@ -223,7 +223,7 @@ async def process_natural_language(
         llm = get_llm_service()
 
         # Get conversation context
-        conversation_history = user_service.get_conversation_history(user.telegram_id, limit=10, hours=24)
+        conversation_history = user_service.get_conversation_history(user['telegram_id'], limit=10, hours=24)
 
         # Parse the message to extract intent and entities
         parsed = llm.parse_command(message)
@@ -231,25 +231,25 @@ async def process_natural_language(
         entities = parsed.get('entities', {})
         confidence = parsed.get('confidence', 0.0)
 
-        logger.info(f"User {user.full_name} - Parsed intent: {intent}, confidence: {confidence}, entities: {entities}")
+        logger.info(f"User {user['full_name']} - Parsed intent: {intent}, confidence: {confidence}, entities: {entities}")
 
         # Check if this is a task intent that requires authorization
         task_intents = ['todo_add', 'todo_complete', 'todo_delete', 'calendar_add', 'reminder_add', 'email_send']
 
-        if intent in task_intents and not user.is_owner and not user.is_authorized:
+        if intent in task_intents and not user['is_owner'] and not user['is_authorized']:
             # Non-authorized user trying to execute a task - request approval
             await request_owner_approval(update, context, user, message, intent, entities, existing_message)
             return
 
         # If not owner but asking a question or having general chat, pass message to owner
-        if not user.is_owner and intent not in task_intents and intent != 'general_chat':
+        if not user['is_owner'] and intent not in task_intents and intent != 'general_chat':
             await forward_message_to_owner(update, user, message)
             response = f"I've forwarded your request to my owner. They will respond shortly."
             if existing_message:
                 await existing_message.edit_text(response)
             else:
                 await update.message.reply_text(response)
-            user_service.add_conversation(user.telegram_id, "assistant", response)
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
             return
 
         # Route to appropriate handler based on intent
@@ -330,7 +330,7 @@ async def handle_todo_add(update, context, entities, original_message, existing_
 
     # Save response to conversation history
     if user:
-        user_service.add_conversation(user.telegram_id, "assistant", response)
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
 
 
 async def handle_todo_list(update, context, entities, existing_message=None, user=None):
@@ -355,7 +355,7 @@ async def handle_todo_list(update, context, entities, existing_message=None, use
 
     # Save response to conversation history
     if user:
-        user_service.add_conversation(user.telegram_id, "assistant", response)
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
 
 
 async def handle_todo_complete(update, context, entities, original_message, existing_message=None, user=None):
@@ -382,7 +382,7 @@ async def handle_todo_complete(update, context, entities, original_message, exis
 
     # Save response to conversation history
     if user:
-        user_service.add_conversation(user.telegram_id, "assistant", response)
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
 
 
 async def handle_calendar_add(update, context, entities, original_message, existing_message=None, user=None):
@@ -405,7 +405,7 @@ async def handle_calendar_add(update, context, entities, original_message, exist
 
     # Save response to conversation history
     if user:
-        user_service.add_conversation(user.telegram_id, "assistant", response)
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
 
 
 async def handle_calendar_list(update, context, entities, existing_message=None, user=None):
@@ -445,7 +445,7 @@ async def handle_calendar_list(update, context, entities, existing_message=None,
 
     # Save response to conversation history
     if user:
-        user_service.add_conversation(user.telegram_id, "assistant", response)
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
 
 
 async def handle_reminder_add(update, context, entities, original_message, existing_message=None, user=None):
@@ -492,7 +492,7 @@ async def handle_reminder_add(update, context, entities, original_message, exist
 
     # Save response to conversation history
     if user:
-        user_service.add_conversation(user.telegram_id, "assistant", response)
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
 
 
 async def handle_email_send(update, context, entities, original_message, existing_message=None, user=None):
@@ -544,7 +544,7 @@ async def handle_email_send(update, context, entities, original_message, existin
 
     # Save response to conversation history
     if user:
-        user_service.add_conversation(user.telegram_id, "assistant", response)
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
 
 
 async def handle_general_chat(update, context, message, existing_message=None, user=None, conversation_history=None):
@@ -569,7 +569,7 @@ async def handle_general_chat(update, context, message, existing_message=None, u
             role = conv['role'].capitalize()
             history_context += f"{role}: {conv['message']}\n"
 
-    user_name = user.first_name if user else "User"
+    user_name = user['first_name'] if user else "User"
 
     system_context = f"""You are {BOT_NAME}, a polite and helpful personal assistant bot.
 You help manage todos, calendar, email, and reminders.
@@ -589,7 +589,7 @@ User's name: {user_name}{history_context}"""
 
     # Save response to conversation history
     if user:
-        user_service.add_conversation(user.telegram_id, "assistant", response)
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
 
 
 async def approve_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
