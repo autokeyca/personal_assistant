@@ -6,6 +6,12 @@ telegram:
   # Your Telegram user ID (for authorization)
   # Get it by messaging @userinfobot on Telegram
   authorized_user_id: 123456789
+  # Owner's name and aliases (for message routing)
+  owner_name: "Your Full Name"
+  owner_aliases:
+    - "Your First Name"
+    - "Nickname"
+    - "Your Full Name"
 
 google:
   # Path to your OAuth2 credentials JSON file

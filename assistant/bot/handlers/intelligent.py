@@ -555,6 +555,7 @@ async def handle_email_send(update, context, entities, original_message, existin
 async def handle_telegram_message(update, context, entities, original_message, existing_message=None, user=None):
     """Handle sending a Telegram message to another user."""
     user_service = UserService()
+    owner_id = get("telegram.authorized_user_id")
 
     recipient_name = entities.get('recipient')
     message_body = entities.get('body') or entities.get('description') or original_message
@@ -570,18 +571,35 @@ async def handle_telegram_message(update, context, entities, original_message, e
             user_service.add_conversation(user['telegram_id'], "assistant", response)
         return
 
-    # Search for the recipient in known users
-    all_users = user_service.get_all_users()
-    recipient = None
-
-    # Try to find recipient by first name, last name, or username
+    # Check if recipient is the owner (by name/aliases)
+    owner_aliases = get("telegram.owner_aliases", [])
     recipient_name_lower = recipient_name.lower()
-    for u in all_users:
-        if (u['first_name'] and recipient_name_lower in u['first_name'].lower()) or \
-           (u['last_name'] and recipient_name_lower in u['last_name'].lower()) or \
-           (u['username'] and recipient_name_lower in u['username'].lower()):
-            recipient = u
+    is_owner_recipient = False
+
+    for alias in owner_aliases:
+        if alias and recipient_name_lower == alias.lower():
+            is_owner_recipient = True
             break
+
+    # If recipient is owner, use owner's telegram_id
+    if is_owner_recipient:
+        recipient = {
+            'telegram_id': owner_id,
+            'first_name': get("telegram.owner_name", "Owner"),
+            'full_name': get("telegram.owner_name", "Owner")
+        }
+    else:
+        # Search for the recipient in known users
+        all_users = user_service.get_all_users()
+        recipient = None
+
+        # Try to find recipient by first name, last name, or username
+        for u in all_users:
+            if (u['first_name'] and recipient_name_lower in u['first_name'].lower()) or \
+               (u['last_name'] and recipient_name_lower in u['last_name'].lower()) or \
+               (u['username'] and recipient_name_lower in u['username'].lower()):
+                recipient = u
+                break
 
     if not recipient:
         response = f"❌ I don't know anyone named '{recipient_name}'. They need to start a conversation with me first."
