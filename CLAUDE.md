@@ -66,3 +66,19 @@ journalctl -u personal-assistant -f
 
 ### Scheduler Integration
 The scheduler is set up in `bot/main.py:create_bot()` after handlers are registered. Jobs use `context.bot` to send messages directly to the authorized user.
+
+## Version Control Policy
+
+**IMPORTANT: Commit and push every change immediately.**
+
+After making ANY code changes (bug fixes, new features, updates):
+1. Stage changes: `git add .`
+2. Commit with descriptive message
+3. Push to GitHub: `git push origin main`
+
+This ensures:
+- All work is backed up continuously
+- Version history is complete and granular
+- No risk of losing changes
+
+**Never skip commits** - every logical change should be committed and pushed immediately.

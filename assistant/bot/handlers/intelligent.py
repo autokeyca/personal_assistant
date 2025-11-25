@@ -117,6 +117,9 @@ async def process_natural_language(
         elif intent == 'reminder_add':
             await handle_reminder_add(update, context, entities, message, existing_message)
 
+        elif intent == 'email_send':
+            await handle_email_send(update, context, entities, message, existing_message)
+
         elif intent == 'general_chat':
             await handle_general_chat(update, context, message, existing_message)
 
@@ -135,12 +138,22 @@ async def process_natural_language(
 
 async def handle_todo_add(update, context, entities, original_message, existing_message=None):
     """Handle adding a todo from natural language."""
+    from dateutil import parser as date_parser
+
     todo_service = TodoService()
 
     title = entities.get('title') or original_message
     description = entities.get('description')
     priority = entities.get('priority', 'medium')
-    due_date = entities.get('date')
+    due_date_str = entities.get('date')
+
+    # Parse date string to datetime object if provided
+    due_date = None
+    if due_date_str:
+        try:
+            due_date = date_parser.parse(due_date_str)
+        except Exception as e:
+            logger.warning(f"Could not parse date '{due_date_str}': {e}")
 
     todo = todo_service.add(
         title=title,
@@ -150,8 +163,10 @@ async def handle_todo_add(update, context, entities, original_message, existing_
     )
 
     response = f"✅ Added todo: {todo['title']}"
+    if priority and priority != 'medium':
+        response += f" ({priority} priority)"
     if due_date:
-        response += f"\n📅 Due: {due_date}"
+        response += f"\n📅 Due: {due_date.strftime('%Y-%m-%d')}"
 
     if existing_message:
         await existing_message.edit_text(response)
@@ -222,15 +237,31 @@ async def handle_calendar_add(update, context, entities, original_message, exist
 async def handle_calendar_list(update, context, entities, existing_message=None):
     """Handle listing calendar events."""
     calendar_service = CalendarService()
-    events = calendar_service.get_upcoming_events(max_results=5)
+
+    # Determine the time range based on entities
+    days = 1  # Default to today
+    if entities.get('date'):
+        # If a specific date is mentioned, show that day
+        days = 1
+
+    events = calendar_service.list_events(days=days, max_results=10)
 
     if not events:
         response = "No upcoming events."
     else:
         response = "*Upcoming Events:*\n"
         for event in events:
-            start = event['start'].get('dateTime', event['start'].get('date'))
-            response += f"• {event['summary']} - {start}\n"
+            # CalendarService returns start as an ISO string already
+            start = event.get('start', 'Unknown time')
+            summary = event.get('summary', 'No title')
+            # Format the datetime nicely
+            try:
+                from dateutil import parser as date_parser
+                dt = date_parser.parse(start)
+                start_formatted = dt.strftime('%Y-%m-%d %H:%M')
+            except:
+                start_formatted = start
+            response += f"• {summary} - {start_formatted}\n"
 
     if existing_message:
         await existing_message.edit_text(response, parse_mode="Markdown")
@@ -278,14 +309,65 @@ async def handle_reminder_add(update, context, entities, original_message, exist
         await update.message.reply_text(response)
 
 
+async def handle_email_send(update, context, entities, original_message, existing_message=None):
+    """Handle sending an email from natural language."""
+    email_service = EmailService()
+
+    recipient = entities.get('recipient')
+    subject = entities.get('subject') or entities.get('title')
+    body = entities.get('body') or entities.get('description')
+
+    # Validate we have the minimum required info
+    if not recipient:
+        response = "❌ I need an email address or recipient name to send an email.\nTry: 'Send an email to john@example.com about the meeting'"
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        return
+
+    if not body:
+        # If no body is extracted, use the original message as body
+        body = original_message
+
+    if not subject:
+        # Generate a subject from the body if not provided
+        subject = body[:50] + "..." if len(body) > 50 else body
+
+    try:
+        # Send the email
+        result = email_service.send_message(
+            to=recipient,
+            subject=subject,
+            body=body
+        )
+
+        response = f"✅ Email sent to {recipient}\n📧 Subject: {subject}"
+
+    except Exception as e:
+        logger.error(f"Error sending email: {e}")
+        response = f"❌ Failed to send email: {str(e)}"
+
+    if existing_message:
+        await existing_message.edit_text(response)
+    else:
+        await update.message.reply_text(response)
+
+
 async def handle_general_chat(update, context, message, existing_message=None):
     """Handle general conversational messages."""
+    from datetime import datetime
     llm = get_llm_service()
 
-    system_context = """You are a helpful personal assistant bot for managing todos, calendar, email, and reminders.
+    # Provide current time context
+    current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+
+    system_context = f"""You are a helpful personal assistant bot for managing todos, calendar, email, and reminders.
 When users ask questions or chat with you, be friendly and helpful.
 If they're asking about their schedule, todos, or want to manage something, guide them to use natural language.
-Keep responses concise and friendly."""
+Keep responses concise and friendly.
+
+Current date and time: {current_time}"""
 
     response = llm.generate_response(message, system_context)
 

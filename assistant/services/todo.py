@@ -21,6 +21,10 @@ class TodoService:
     ) -> Todo:
         """Add a new todo item."""
         with get_session() as session:
+            # Handle None priority by using default
+            if priority is None:
+                priority = "medium"
+
             todo = Todo(
                 title=title,
                 description=description,

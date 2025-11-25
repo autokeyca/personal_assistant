@@ -69,11 +69,13 @@ Return ONLY a JSON object with this structure:
     "intent": "one of: todo_add, todo_list, todo_complete, todo_delete, calendar_add, calendar_list, reminder_add, email_send, email_check, help, general_chat",
     "entities": {{
         "title": "extracted title/subject",
-        "description": "extracted description",
+        "description": "extracted description or email body",
         "date": "extracted date in YYYY-MM-DD format",
         "time": "extracted time in HH:MM format",
         "priority": "high/medium/low if mentioned",
-        "recipient": "email recipient if applicable",
+        "recipient": "email recipient address or name",
+        "subject": "email subject line if mentioned",
+        "body": "email body/message content",
         "duration": "event duration if mentioned"
     }},
     "confidence": 0.95
@@ -86,6 +88,7 @@ Important:
 - Use null for missing entities
 - For dates, interpret "tomorrow", "next week", etc. relative to today
 - For times, use 24-hour format
+- For email_send: extract recipient (email or name), subject, and body
 - If the message is conversational/chat, use "general_chat" intent
 """
 
