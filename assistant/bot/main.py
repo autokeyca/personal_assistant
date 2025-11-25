@@ -77,9 +77,13 @@ def create_bot() -> Application:
     app.add_handler(CommandHandler("reminders", reminders.list_reminders, filters=user_filter))
     app.add_handler(CommandHandler("delremind", reminders.delete_reminder, filters=user_filter))
 
-    # Handle voice messages (with LLM transcription and processing)
+    # Approval commands (owner only)
+    app.add_handler(CommandHandler("approve", intelligent.approve_request, filters=user_filter))
+    app.add_handler(CommandHandler("reject", intelligent.reject_request, filters=user_filter))
+
+    # Handle voice messages (from anyone - authorization checked in handler)
     app.add_handler(MessageHandler(
-        filters.VOICE & user_filter,
+        filters.VOICE,
         intelligent.handle_voice
     ))
 
@@ -89,9 +93,9 @@ def create_bot() -> Application:
         general.unknown_command
     ))
 
-    # Handle regular text messages (with intelligent LLM processing)
+    # Handle regular text messages (from anyone - authorization checked in handler)
     app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & user_filter,
+        filters.TEXT & ~filters.COMMAND,
         intelligent.handle_intelligent_message
     ))
 

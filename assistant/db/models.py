@@ -1,8 +1,8 @@
 """SQLAlchemy database models."""
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Enum
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Enum, BigInteger, ForeignKey
+from sqlalchemy.orm import declarative_base, relationship
 import enum
 
 Base = declarative_base()
@@ -94,3 +94,85 @@ class EmailCache(Base):
 
     def __repr__(self):
         return f"<EmailCache(id='{self.id}', subject='{self.subject[:30]}...')>"
+
+
+class User(Base):
+    """Users who have interacted with Jeeves."""
+    __tablename__ = "users"
+
+    telegram_id = Column(BigInteger, primary_key=True)  # Telegram user ID
+    first_name = Column(String(200), nullable=True)
+    last_name = Column(String(200), nullable=True)
+    username = Column(String(200), nullable=True)  # @username
+    is_owner = Column(Boolean, default=False)  # True for the authorized owner
+    is_authorized = Column(Boolean, default=False)  # True if allowed to send tasks
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationship to conversation history
+    conversations = relationship("ConversationHistory", back_populates="user", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<User(telegram_id={self.telegram_id}, name='{self.first_name}', owner={self.is_owner})>"
+
+    def to_dict(self):
+        return {
+            "telegram_id": self.telegram_id,
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "username": self.username,
+            "is_owner": self.is_owner,
+            "is_authorized": self.is_authorized,
+            "first_seen": self.first_seen.isoformat() if self.first_seen else None,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+        }
+
+    @property
+    def full_name(self):
+        """Get user's full name."""
+        if self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        return self.first_name or self.username or f"User {self.telegram_id}"
+
+
+class ConversationHistory(Base):
+    """Conversation history for context retention."""
+    __tablename__ = "conversation_history"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    role = Column(String(20), nullable=False)  # 'user' or 'assistant'
+    message = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship to user
+    user = relationship("User", back_populates="conversations")
+
+    def __repr__(self):
+        return f"<ConversationHistory(id={self.id}, user_id={self.user_id}, role='{self.role}')>"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "role": self.role,
+            "message": self.message,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+        }
+
+
+class PendingApproval(Base):
+    """Pending task approvals from non-owner users."""
+    __tablename__ = "pending_approvals"
+
+    id = Column(Integer, primary_key=True)
+    requester_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    request_message = Column(Text, nullable=False)  # What the user asked for
+    intent = Column(String(50), nullable=True)  # Parsed intent from LLM
+    entities = Column(Text, nullable=True)  # JSON-encoded entities
+    status = Column(String(20), default="pending")  # pending, approved, rejected
+    created_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<PendingApproval(id={self.id}, requester_id={self.requester_id}, status='{self.status}')>"
