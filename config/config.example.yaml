@@ -42,3 +42,5 @@ scheduler:
 logging:
   level: "INFO"
   file: "logs/assistant.log"
+
+timezone: "America/Montreal"  # Timezone for all date/time operations

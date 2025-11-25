@@ -357,10 +357,15 @@ async def handle_email_send(update, context, entities, original_message, existin
 async def handle_general_chat(update, context, message, existing_message=None):
     """Handle general conversational messages."""
     from datetime import datetime
+    import pytz
+    from assistant.config import get
+
     llm = get_llm_service()
 
-    # Provide current time context
-    current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+    # Get timezone from config and provide current time context
+    tz_name = get("timezone", "America/Montreal")
+    tz = pytz.timezone(tz_name)
+    current_time = datetime.now(tz).strftime("%A, %B %d, %Y at %I:%M %p %Z")
 
     system_context = f"""You are a helpful personal assistant bot for managing todos, calendar, email, and reminders.
 When users ask questions or chat with you, be friendly and helpful.

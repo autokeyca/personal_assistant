@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+import pytz
 from telegram import Bot
 from telegram.error import TelegramError
 
@@ -15,9 +16,11 @@ logger = logging.getLogger(__name__)
 async def check_reminders(bot: Bot):
     """Check for due reminders and send them."""
     user_id = get("telegram.authorized_user_id")
+    tz_name = get("timezone", "America/Montreal")
+    tz = pytz.timezone(tz_name)
 
     with get_session() as session:
-        now = datetime.utcnow()
+        now = datetime.now(tz)
 
         due_reminders = (
             session.query(Reminder)
@@ -125,13 +128,15 @@ async def send_morning_briefing(bot: Bot):
 async def check_upcoming_events(bot: Bot):
     """Notify about events starting soon."""
     user_id = get("telegram.authorized_user_id")
+    tz_name = get("timezone", "America/Montreal")
+    tz = pytz.timezone(tz_name)
 
     try:
         calendar_service = CalendarService()
 
         # Get events in the next 15 minutes
         from datetime import datetime
-        now = datetime.utcnow()
+        now = datetime.now(tz)
         events = calendar_service.list_events(days=1, max_results=50)
 
         for event in events:
@@ -141,9 +146,11 @@ async def check_upcoming_events(bot: Bot):
             from dateutil import parser
             start = parser.parse(event["start"])
 
-            # Convert to UTC for comparison if needed
-            if start.tzinfo:
-                start = start.replace(tzinfo=None)
+            # Ensure both times are timezone-aware for comparison
+            if start.tzinfo is None:
+                start = tz.localize(start)
+            else:
+                start = start.astimezone(tz)
 
             # Check if event starts in 10-15 minutes
             minutes_until = (start - now).total_seconds() / 60
