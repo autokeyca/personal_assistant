@@ -1,4 +1,4 @@
-"""User management service for Jeeves."""
+"""User management service for Jarvis."""
 
 import logging
 from datetime import datetime, timedelta
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class UserService:
-    """Service for managing users and their interactions with Jeeves."""
+    """Service for managing users and their interactions with Jarvis."""
 
     def __init__(self):
         self.owner_id = get("telegram.authorized_user_id")
@@ -262,7 +262,7 @@ class UserService:
             return user.to_dict() if user else None
 
     def get_all_users(self) -> List[Dict[str, Any]]:
-        """Get all users who have interacted with Jeeves."""
+        """Get all users who have interacted with Jarvis."""
         with get_session() as session:
             users = session.query(User).order_by(User.last_seen.desc()).all()
             return [user.to_dict() for user in users]

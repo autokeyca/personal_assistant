@@ -19,7 +19,7 @@ from assistant.config import get
 logger = logging.getLogger(__name__)
 
 # Bot name
-BOT_NAME = "Jeeves"
+BOT_NAME = "Jarvis"
 
 
 def get_llm_service() -> LLMService:

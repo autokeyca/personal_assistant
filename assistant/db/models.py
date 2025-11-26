@@ -97,7 +97,7 @@ class EmailCache(Base):
 
 
 class User(Base):
-    """Users who have interacted with Jeeves."""
+    """Users who have interacted with Jarvis."""
     __tablename__ = "users"
 
     telegram_id = Column(BigInteger, primary_key=True)  # Telegram user ID
