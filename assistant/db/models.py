@@ -37,6 +37,15 @@ class Todo(Base):
     completed_at = Column(DateTime, nullable=True)
     tags = Column(String(500), nullable=True)  # Comma-separated tags
 
+    # Multi-user support
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=True)
+    created_by = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=True)
+
+    # Follow-up system
+    follow_up_intensity = Column(String(20), default='medium')  # none, low, medium, high, urgent
+    last_followup_at = Column(DateTime, nullable=True)
+    next_followup_at = Column(DateTime, nullable=True)
+
     def __repr__(self):
         return f"<Todo(id={self.id}, title='{self.title[:30]}...', status={self.status.value})>"
 
@@ -50,6 +59,11 @@ class Todo(Base):
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "created_at": self.created_at.isoformat(),
             "tags": self.tags.split(",") if self.tags else [],
+            "user_id": self.user_id,
+            "created_by": self.created_by,
+            "follow_up_intensity": self.follow_up_intensity,
+            "last_followup_at": self.last_followup_at.isoformat() if self.last_followup_at else None,
+            "next_followup_at": self.next_followup_at.isoformat() if self.next_followup_at else None,
         }
 
 
@@ -108,6 +122,10 @@ class User(Base):
     is_authorized = Column(Boolean, default=False)  # True if allowed to send tasks
     first_seen = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Follow-up settings
+    default_followup_intensity = Column(String(20), default='medium')  # none, low, medium, high, urgent
+    followup_enabled = Column(Boolean, default=True)
 
     # Relationship to conversation history
     conversations = relationship("ConversationHistory", back_populates="user", cascade="all, delete-orphan")
@@ -178,3 +196,30 @@ class PendingApproval(Base):
 
     def __repr__(self):
         return f"<PendingApproval(id={self.id}, requester_id={self.requester_id}, status='{self.status}')>"
+
+
+class BehaviorConfig(Base):
+    """Runtime behavior configuration for dynamic system modification."""
+    __tablename__ = "behavior_configs"
+
+    key = Column(String(100), primary_key=True)  # Config parameter name
+    value = Column(Text, nullable=False)  # Current value (stored as JSON string if complex)
+    value_type = Column(String(20), default="string")  # string, int, float, bool, json
+    description = Column(Text, nullable=True)  # Human-readable description
+    category = Column(String(50), nullable=True)  # Category: timing, behavior, feature, etc.
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(String(200), nullable=True)  # Who/what updated it
+
+    def __repr__(self):
+        return f"<BehaviorConfig(key='{self.key}', value='{self.value}')>"
+
+    def to_dict(self):
+        return {
+            "key": self.key,
+            "value": self.value,
+            "value_type": self.value_type,
+            "description": self.description,
+            "category": self.category,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "updated_by": self.updated_by,
+        }

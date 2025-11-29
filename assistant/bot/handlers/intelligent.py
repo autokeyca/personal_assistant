@@ -12,9 +12,12 @@ from assistant.services import (
     TodoService,
     CalendarService,
     EmailService,
-    UserService
+    UserService,
+    PromptService,
+    BehaviorConfigService
 )
 from assistant.config import get
+from assistant.bot.handlers.todo import format_todo_list
 
 logger = logging.getLogger(__name__)
 
@@ -53,25 +56,48 @@ I can help you with:
 
 You can speak to me naturally or send voice messages, and I'll do my best to assist you."""
     else:
-        # Introduction for other users
-        intro = f"""Good day! I'm {BOT_NAME}, a personal assistant.
+        # Introduction for other users - different message based on authorization status
+        if user['is_authorized']:
+            intro = f"""Good day! I'm {BOT_NAME}, a personal assistant.
 
-I'm currently serving my owner, but I'm happy to pass along messages or requests to them. Please note that I can only execute tasks with my owner's explicit permission.
+You are authorized to use my services. I can help you with:
+• Managing your todos and tasks
+• Setting up reminders
+• General conversation and questions
+
+How may I assist you?"""
+        else:
+            intro = f"""Good day! I'm {BOT_NAME}, a personal assistant.
+
+I'm currently serving my owner. I can pass along messages or requests to them, but I need my owner's authorization to execute tasks on your behalf.
+
+Your introduction has been forwarded to my owner for approval.
 
 How may I assist you?"""
 
     await update.message.reply_text(intro)
 
-    # If not owner, notify owner about new contact
+    # If not owner, send comprehensive notification to owner about new contact
     if not user['is_owner']:
-        owner_notification = f"""📬 New contact: {user['full_name']}
+        owner_notification = f"""🔔 New User Contact
 
-{user['full_name']} has started a conversation with {BOT_NAME}.
-User ID: {user['telegram_id']}
-Username: @{user['username'] if user['username'] else 'N/A'}"""
+👤 *User Details:*
+Name: {user['full_name']}
+User ID: `{user['telegram_id']}`
+Username: @{user['username'] if user['username'] else 'N/A'}
+
+*Authorization Commands:*
+• `/authorize {user['telegram_id']}` - Grant task execution permissions
+• `/block {user['telegram_id']}` - Revoke all permissions
+
+This user can currently send messages but cannot execute tasks until authorized."""
 
         try:
-            await update.get_bot().send_message(chat_id=owner_id, text=owner_notification)
+            await update.get_bot().send_message(
+                chat_id=owner_id,
+                text=owner_notification,
+                parse_mode="Markdown"
+            )
         except Exception as e:
             logger.error(f"Failed to notify owner about new user: {e}")
 
@@ -233,9 +259,22 @@ async def process_natural_language(
 
         logger.info(f"User {user['full_name']} - Parsed intent: {intent}, confidence: {confidence}, entities: {entities}")
 
+        # Owner-only intents (email and calendar are private to the owner)
+        owner_only_intents = ['calendar_add', 'calendar_list', 'email_send', 'email_check']
+
+        # Check if non-owner is trying to access owner-only features
+        if intent in owner_only_intents and not user['is_owner']:
+            response = "⛔ Email and calendar management are only available to my owner. You have access to todo management and reminders."
+            if existing_message:
+                await existing_message.edit_text(response)
+            else:
+                await update.message.reply_text(response)
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+            return
+
         # Check if this is a task intent that requires authorization
         # Note: telegram_message is NOT in this list - messages are relayed directly
-        task_intents = ['todo_add', 'todo_complete', 'todo_delete', 'calendar_add', 'reminder_add', 'email_send']
+        task_intents = ['todo_add', 'todo_complete', 'todo_delete', 'reminder_add']
 
         if intent in task_intents and not user['is_owner'] and not user['is_authorized']:
             # Non-authorized user trying to execute a task - request approval
@@ -244,7 +283,7 @@ async def process_natural_language(
 
         # If not owner but asking a question or having general chat, pass message to owner
         # Note: telegram_message is handled by its own handler, not forwarded
-        if not user['is_owner'] and intent not in task_intents and intent not in ['general_chat', 'telegram_message']:
+        if not user['is_owner'] and intent not in task_intents and intent not in owner_only_intents and intent not in ['general_chat', 'telegram_message']:
             await forward_message_to_owner(update, user, message)
             response = f"I've forwarded your request to my owner. They will respond shortly."
             if existing_message:
@@ -264,6 +303,12 @@ async def process_natural_language(
         elif intent == 'todo_complete':
             await handle_todo_complete(update, context, entities, message, existing_message, user)
 
+        elif intent == 'todo_delete':
+            await handle_todo_delete(update, context, entities, message, existing_message, user)
+
+        elif intent == 'todo_focus':
+            await handle_todo_focus(update, context, entities, message, existing_message, user)
+
         elif intent == 'calendar_add':
             await handle_calendar_add(update, context, entities, message, existing_message, user)
 
@@ -278,6 +323,15 @@ async def process_natural_language(
 
         elif intent == 'telegram_message':
             await handle_telegram_message(update, context, entities, message, existing_message, user)
+
+        elif intent == 'meta_modify_prompt':
+            await handle_meta_modify_prompt(update, context, entities, message, existing_message, user)
+
+        elif intent == 'meta_configure':
+            await handle_meta_configure(update, context, entities, message, existing_message, user)
+
+        elif intent == 'meta_extend':
+            await handle_meta_extend(update, context, entities, message, existing_message, user)
 
         elif intent == 'general_chat':
             await handle_general_chat(update, context, message, existing_message, user, conversation_history)
@@ -306,6 +360,8 @@ async def handle_todo_add(update, context, entities, original_message, existing_
     description = entities.get('description')
     priority = entities.get('priority', 'medium')
     due_date_str = entities.get('date')
+    intensity = entities.get('intensity')
+    for_user_name = entities.get('for_user')
 
     # Parse date string to datetime object if provided
     due_date = None
@@ -315,23 +371,131 @@ async def handle_todo_add(update, context, entities, original_message, existing_
         except Exception as e:
             logger.warning(f"Could not parse date '{due_date_str}': {e}")
 
+    # Determine the target user for this todo
+    target_user_id = user['telegram_id']  # Default to self
+    target_user_name = user['first_name']
+
+    if for_user_name and user['is_owner']:
+        # Owner is adding a task for someone else
+        from assistant.db import get_session, User
+        with get_session() as session:
+            target_user = session.query(User).filter(
+                User.first_name.ilike(for_user_name)
+            ).first()
+
+            if target_user:
+                target_user_id = target_user.telegram_id
+                target_user_name = target_user.first_name
+            else:
+                response = f"❌ User '{for_user_name}' not found. They need to start Jarvis first."
+                if existing_message:
+                    await existing_message.edit_text(response)
+                else:
+                    await update.message.reply_text(response)
+                return
+
     todo = todo_service.add(
         title=title,
         description=description,
         priority=priority,
-        due_date=due_date
+        due_date=due_date,
+        user_id=target_user_id,
+        created_by=user['telegram_id'],
+        follow_up_intensity=intensity
     )
 
-    response = f"✅ Added todo: {todo['title']}"
-    if priority and priority != 'medium':
-        response += f" ({priority} priority)"
-    if due_date:
-        response += f"\n📅 Due: {due_date.strftime('%Y-%m-%d')}"
+    # Check if user wants to focus on this new task
+    should_focus = 'focus' in original_message.lower() and target_user_id == user['telegram_id']
+
+    if should_focus:
+        # Set this as the active task and pin it
+        todo_service.set_active_task(todo['id'])
+
+        # Unpin previous focus message if it exists
+        from assistant.db import get_session, Setting
+        with get_session() as session:
+            setting = session.query(Setting).filter(Setting.key == "pinned_focus_message_id").first()
+            if setting and setting.value:
+                try:
+                    await context.bot.unpin_chat_message(
+                        chat_id=update.effective_chat.id,
+                        message_id=int(setting.value)
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not unpin previous message: {e}")
+
+        # Format focus message
+        priority_icon = {
+            "urgent": " ‼️",
+            "high": " ❗",
+            "medium": "",
+            "low": "",
+        }.get(priority, "")
+
+        due = ""
+        if due_date:
+            due = f"\n📅 Due: {due_date.strftime('%B %d, %H:%M')}"
+
+        focus_text = (
+            f"🎯 *FOCUSED TASK*\n\n"
+            f"`{todo['id']}` {todo['title']}{priority_icon}{due}"
+        )
+        if description:
+            focus_text += f"\n\n_{description}_"
+
+        # Send and pin the message
+        focus_message = await update.message.reply_text(focus_text, parse_mode="Markdown")
+        await focus_message.pin(disable_notification=True)
+
+        # Store pinned message ID
+        with get_session() as session:
+            setting = session.query(Setting).filter(Setting.key == "pinned_focus_message_id").first()
+            if setting:
+                setting.value = str(focus_message.message_id)
+            else:
+                setting = Setting(key="pinned_focus_message_id", value=str(focus_message.message_id))
+                session.add(setting)
+
+    # Show confirmation
+    if for_user_name and target_user_id != user['telegram_id']:
+        # Task added for someone else
+        response = f"✅ Added to {target_user_name}'s list: {todo['title']}"
+
+        # Notify the target user
+        try:
+            notify_msg = f"📋 New task from {user['first_name']}:\n\n{todo['title']}"
+            if priority and priority != 'medium':
+                notify_msg += f"\n🎯 Priority: {priority.capitalize()}"
+            if due_date:
+                notify_msg += f"\n📅 Due: {due_date.strftime('%Y-%m-%d')}"
+            if description:
+                notify_msg += f"\n\n{description}"
+
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=notify_msg
+            )
+        except Exception as e:
+            logger.warning(f"Could not notify user {target_user_name}: {e}")
+
+        # Show target user's todo list
+        todos = todo_service.list(user_id=target_user_id, include_completed=False)
+        list_title = f"{target_user_name}'s Todos"
+        response += f"\n\n{format_todo_list(todos, title=list_title)}"
+    else:
+        # Task added for self
+        todos = todo_service.list(user_id=target_user_id, include_completed=False)
+        response = f"✅ Added: {todo['title']}"
+        if priority and priority != 'medium':
+            response += f" ({priority} priority)"
+        if due_date:
+            response += f"\n📅 Due: {due_date.strftime('%Y-%m-%d')}"
+        response += f"\n\n{format_todo_list(todos)}"
 
     if existing_message:
-        await existing_message.edit_text(response)
+        await existing_message.edit_text(response, parse_mode="Markdown")
     else:
-        await update.message.reply_text(response)
+        await update.message.reply_text(response, parse_mode="Markdown")
 
     # Save response to conversation history
     if user:
@@ -342,16 +506,44 @@ async def handle_todo_list(update, context, entities, existing_message=None, use
     """Handle listing todos."""
     user_service = UserService()
     todo_service = TodoService()
-    todos = todo_service.list(limit=10)
 
-    if not todos:
-        response = "No todos found."
+    user_name = entities.get('user_name')
+    target_user_id = user['telegram_id']
+    list_title = "Your Todos"
+    show_all = False
+
+    # Determine whose todos to show
+    if user_name:
+        if user_name.lower() == 'all' and user['is_owner']:
+            # Show all users' todos
+            show_all = True
+            list_title = "All Todos"
+        elif user['is_owner']:
+            # Show specific user's todos
+            from assistant.db import get_session, User
+            with get_session() as session:
+                target_user = session.query(User).filter(
+                    User.first_name.ilike(user_name)
+                ).first()
+
+                if target_user:
+                    target_user_id = target_user.telegram_id
+                    list_title = f"{target_user.first_name}'s Todos"
+                else:
+                    response = f"❌ User '{user_name}' not found."
+                    if existing_message:
+                        await existing_message.edit_text(response)
+                    else:
+                        await update.message.reply_text(response)
+                    return
+
+    # Get todos
+    if show_all:
+        todos = todo_service.list(all_users=True, include_completed=False)
     else:
-        response = "*Your Todos:*\n"
-        for todo in todos:
-            priority_icon = {"urgent": "‼️", "high": "❗", "medium": "➖", "low": "🔽"}
-            icon = priority_icon.get(todo["priority"], "➖")
-            response += f"{icon} {todo['id']}. {todo['title']}\n"
+        todos = todo_service.list(user_id=target_user_id, include_completed=False)
+
+    response = format_todo_list(todos, title=list_title)
 
     if existing_message:
         await existing_message.edit_text(response, parse_mode="Markdown")
@@ -369,21 +561,244 @@ async def handle_todo_complete(update, context, entities, original_message, exis
     todo_service = TodoService()
 
     # Try to extract ID from entities or find by title
-    title = entities.get('title', '')
+    title = entities.get('title') or ''
+    if title is None:
+        title = ''
+
+    # Strip common articles from the beginning for better matching
+    import re
+    title = re.sub(r'^(the|a|an)\s+', '', title, flags=re.IGNORECASE).strip()
+
+    # Get all pending tasks for this user
+    pending_todos = todo_service.list(user_id=user['telegram_id'], include_completed=False)
+
+    # If ambiguous (short title or no title), need confirmation
+    is_ambiguous = len(title) < 3 or title.lower() in ['it', 'that', 'this', 'task', 'todo']
+
+    if is_ambiguous and len(pending_todos) > 1:
+        # Multiple tasks and ambiguous request - ask for confirmation
+        # Prioritize most recent task created by someone else
+        suggested_task = None
+        for todo in sorted(pending_todos, key=lambda x: x['created_at'], reverse=True):
+            if todo['created_by'] and todo['created_by'] != user['telegram_id']:
+                suggested_task = todo
+                break
+
+        # If no tasks created by others, use most recent overall
+        if not suggested_task and pending_todos:
+            suggested_task = sorted(pending_todos, key=lambda x: x['created_at'], reverse=True)[0]
+
+        # Show suggestion and ask for confirmation
+        response = f"📋 You have {len(pending_todos)} pending tasks. Did you mean:\n\n"
+        response += f"**#{suggested_task['id']}** {suggested_task['title']}"
+        if suggested_task.get('priority') and suggested_task['priority'] != 'medium':
+            response += f" ({suggested_task['priority']} priority)"
+        response += f"\n\nReply with:\n"
+        response += f"• 'yes' or 'confirm' to complete this task\n"
+        response += f"• A task number (e.g., '{suggested_task['id']}') to complete a specific task\n"
+        response += f"• 'list' to see all your tasks"
+
+    elif title.isdigit():
+        # User specified a task number directly
+        todo_id = int(title)
+        todo = todo_service.get(todo_id)
+
+        if todo and todo['user_id'] == user['telegram_id'] and todo['status'] != 'completed':
+            # Complete the task
+            active = todo_service.get_active_task()
+            is_focused = active and active['id'] == todo_id
+
+            todo_service.complete(todo_id)
+
+            # Unpin if this was the focused task
+            if is_focused:
+                from assistant.db import get_session, Setting
+                with get_session() as session:
+                    setting = session.query(Setting).filter(Setting.key == "pinned_focus_message_id").first()
+                    if setting and setting.value:
+                        try:
+                            await context.bot.unpin_chat_message(
+                                chat_id=update.effective_chat.id,
+                                message_id=int(setting.value)
+                            )
+                            setting.value = None
+                        except Exception as e:
+                            logger.warning(f"Could not unpin message: {e}")
+
+            remaining_todos = todo_service.list(user_id=user['telegram_id'], include_completed=False)
+            response = f"✅ Completed: {todo['title']}\n\n{format_todo_list(remaining_todos)}"
+        else:
+            response = f"❌ Task #{todo_id} not found or already completed."
+
+    else:
+        # Search for matching todo by title
+        todos = todo_service.search(title)
+
+        # Filter to only this user's pending todos
+        user_todos = [t for t in todos if t['user_id'] == user['telegram_id'] and t['status'] != 'completed']
+
+        if user_todos:
+            todo_id = user_todos[0]['id']
+
+            # Check if this is the focused task
+            active = todo_service.get_active_task()
+            is_focused = active and active['id'] == todo_id
+
+            todo_service.complete(todo_id)
+
+            # Unpin if this was the focused task
+            if is_focused:
+                from assistant.db import get_session, Setting
+                with get_session() as session:
+                    setting = session.query(Setting).filter(Setting.key == "pinned_focus_message_id").first()
+                    if setting and setting.value:
+                        try:
+                            await context.bot.unpin_chat_message(
+                                chat_id=update.effective_chat.id,
+                                message_id=int(setting.value)
+                            )
+                            setting.value = None
+                        except Exception as e:
+                            logger.warning(f"Could not unpin message: {e}")
+
+            # Show confirmation and list
+            remaining_todos = todo_service.list(user_id=user['telegram_id'], include_completed=False)
+            response = f"✅ Completed: {user_todos[0]['title']}\n\n{format_todo_list(remaining_todos)}"
+        else:
+            response = "❌ Could not find matching todo. Try /todo to see your list."
+
+    if existing_message:
+        await existing_message.edit_text(response, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+    # Save response to conversation history
+    if user:
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+
+async def handle_todo_delete(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle deleting a todo."""
+    user_service = UserService()
+    todo_service = TodoService()
+
+    # Try to extract title from entities
+    title = entities.get('title') or ''
+    if title is None:
+        title = ''
+
+    # Strip common articles from the beginning for better matching
+    import re
+    title = re.sub(r'^(the|a|an)\s+', '', title, flags=re.IGNORECASE).strip()
 
     # Search for matching todo
     todos = todo_service.search(title)
     if todos:
         todo_id = todos[0]['id']
-        todo_service.complete(todo_id)
-        response = f"✅ Marked as complete: {todos[0]['title']}"
+        todo_service.delete(todo_id)
+
+        # Show confirmation and list
+        remaining_todos = todo_service.list(include_completed=False)
+        response = f"🗑️ Deleted: {todos[0]['title']}\n\n{format_todo_list(remaining_todos)}"
     else:
         response = "❌ Could not find matching todo. Try /todo to see your list."
 
     if existing_message:
-        await existing_message.edit_text(response)
+        await existing_message.edit_text(response, parse_mode="Markdown")
     else:
-        await update.message.reply_text(response)
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+    # Save response to conversation history
+    if user:
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+
+async def handle_todo_focus(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle focusing on a todo task."""
+    user_service = UserService()
+    todo_service = TodoService()
+
+    # Try to extract title from entities or use original message
+    title = entities.get('title') or original_message or ''
+
+    # Handle None values
+    if title is None:
+        title = ''
+
+    # Strip common articles from the beginning for better matching
+    import re
+    title = re.sub(r'^(the|a|an)\s+', '', title, flags=re.IGNORECASE).strip()
+
+    # Try to parse as ID first
+    todo_id = None
+    if title.isdigit():
+        todo_id = int(title)
+    else:
+        # Search for matching todo
+        todos = todo_service.search(title)
+        if todos:
+            todo_id = todos[0]['id']
+
+    if todo_id:
+        result = todo_service.set_active_task(todo_id)
+        if result:
+            # Unpin previous focus message if it exists
+            from assistant.db import get_session, Setting
+            with get_session() as session:
+                setting = session.query(Setting).filter(Setting.key == "pinned_focus_message_id").first()
+                if setting and setting.value:
+                    try:
+                        await context.bot.unpin_chat_message(
+                            chat_id=update.effective_chat.id,
+                            message_id=int(setting.value)
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not unpin previous message: {e}")
+
+            # Format focus message
+            priority_icon = {
+                "urgent": " ‼️",
+                "high": " ❗",
+                "medium": "",
+                "low": "",
+            }.get(result["priority"], "")
+
+            due = ""
+            if result.get("due_date"):
+                from dateutil import parser
+                dt = parser.parse(result["due_date"])
+                due = f"\n📅 Due: {dt.strftime('%B %d, %H:%M')}"
+
+            text = (
+                f"🎯 *FOCUSED TASK*\n\n"
+                f"`{result['id']}` {result['title']}{priority_icon}{due}"
+            )
+            if result.get("description"):
+                text += f"\n\n_{result['description']}_"
+
+            # Send and pin the message
+            if existing_message:
+                # Can't pin edited messages, send new one
+                message = await update.message.reply_text(text, parse_mode="Markdown")
+            else:
+                message = await update.message.reply_text(text, parse_mode="Markdown")
+
+            await message.pin(disable_notification=True)
+
+            # Store pinned message ID
+            with get_session() as session:
+                setting = session.query(Setting).filter(Setting.key == "pinned_focus_message_id").first()
+                if setting:
+                    setting.value = str(message.message_id)
+                else:
+                    setting = Setting(key="pinned_focus_message_id", value=str(message.message_id))
+                    session.add(setting)
+
+            response = f"🎯 Now focused on: {result['title']}"
+        else:
+            response = "❌ Could not find that todo."
+    else:
+        response = "❌ Could not find matching todo. Try /todo to see your list."
 
     # Save response to conversation history
     if user:
@@ -652,6 +1067,7 @@ async def handle_general_chat(update, context, message, existing_message=None, u
     from assistant.config import get
 
     user_service = UserService()
+    prompt_service = PromptService()
     llm = get_llm_service()
 
     # Get timezone from config and provide current time context
@@ -669,11 +1085,11 @@ async def handle_general_chat(update, context, message, existing_message=None, u
 
     user_name = user['first_name'] if user else "User"
 
-    system_context = f"""You are {BOT_NAME}, a polite and helpful personal assistant bot.
-You help manage todos, calendar, email, and reminders.
-When users ask questions or chat with you, be friendly and professional.
-If they're asking about their schedule, todos, or want to manage something, guide them to use natural language.
-Keep responses concise and friendly.
+    # Load personality prompt from database
+    personality_template = prompt_service.get_personality_prompt()
+
+    # Format the prompt with current context
+    system_context = f"""{personality_template}
 
 Current date and time: {current_time}
 User's name: {user_name}{history_context}"""
@@ -686,6 +1102,293 @@ User's name: {user_name}{history_context}"""
         await update.message.reply_text(response)
 
     # Save response to conversation history
+    if user:
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+
+async def handle_meta_modify_prompt(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle meta-command to modify system prompts via natural language."""
+    user_service = UserService()
+    prompt_service = PromptService()
+    llm = get_llm_service()
+
+    # Only owner can modify prompts
+    if not user['is_owner']:
+        response = "⛔ Only the owner can modify system prompts."
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    prompt_type = entities.get('prompt_type', 'personality').lower()
+    modification = entities.get('modification') or original_message
+
+    # Validate prompt type
+    if prompt_type not in ['personality', 'parser', 'command']:
+        prompt_type = 'personality'  # Default
+
+    # Map 'command' to 'parser'
+    if prompt_type == 'command':
+        prompt_type = 'parser'
+
+    # Get current prompt
+    if prompt_type == 'personality':
+        current_prompt = prompt_service.get_personality_prompt()
+        prompt_name = "Personality"
+    else:
+        current_prompt = prompt_service.get_parser_prompt()
+        prompt_name = "Parser"
+
+    # Use LLM to generate modified prompt
+    meta_prompt = f"""You are modifying a system prompt based on user instructions.
+
+Current {prompt_name} Prompt:
+```
+{current_prompt}
+```
+
+User's Modification Request:
+{modification}
+
+Generate an updated version of the prompt that incorporates the user's request while maintaining the essential structure and purpose of the original prompt.
+
+Return ONLY the new prompt text, without any explanations or markdown formatting."""
+
+    try:
+        new_prompt = llm.process_message(meta_prompt)
+
+        # Remove markdown code blocks if present
+        import re
+        new_prompt = re.sub(r'^```.*?\n', '', new_prompt, flags=re.MULTILINE)
+        new_prompt = re.sub(r'\n```$', '', new_prompt)
+        new_prompt = new_prompt.strip()
+
+        # Save the new prompt
+        if prompt_type == 'personality':
+            success = prompt_service.set_personality_prompt(new_prompt)
+        else:
+            success = prompt_service.set_parser_prompt(new_prompt)
+
+        if success:
+            # Show preview
+            preview = new_prompt[:400] + "..." if len(new_prompt) > 400 else new_prompt
+            response = f"""✅ {prompt_name} prompt updated!
+
+**Preview:**
+```
+{preview}
+```
+
+**What changed:** {modification}
+
+The changes will take effect immediately. Use `/viewprompt {prompt_type}` to see the full prompt."""
+        else:
+            response = f"❌ Failed to update {prompt_name.lower()} prompt."
+
+    except Exception as e:
+        logger.error(f"Error modifying prompt: {e}")
+        response = f"❌ Error modifying prompt: {str(e)}"
+
+    if existing_message:
+        await existing_message.edit_text(response, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+    if user:
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+
+async def handle_meta_configure(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle meta-command to configure system behavior."""
+    user_service = UserService()
+    behavior_service = BehaviorConfigService()
+
+    # Only owner can configure behavior
+    if not user['is_owner']:
+        response = "⛔ Only the owner can configure system behavior."
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    config_key = entities.get('config_key')
+    config_value = entities.get('config_value')
+
+    # If no specific key/value extracted, list all configs
+    if not config_key:
+        configs = behavior_service.list_all()
+        if configs:
+            response = "**Current Behavior Configurations:**\n\n"
+            for config in configs:
+                category = f"[{config['category']}] " if config['category'] else ""
+                response += f"{category}**{config['key']}** = `{config['value']}`"
+                if config.get('description'):
+                    response += f"\n  _{config['description']}_"
+                response += "\n\n"
+            response += "To change a setting, say: 'change [setting] to [value]'"
+        else:
+            response = "No behavior configurations set.\n\nExample: 'Set reminder check interval to 5 minutes'"
+
+        if existing_message:
+            await existing_message.edit_text(response, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(response, parse_mode="Markdown")
+
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    # Try to infer category from key
+    category = None
+    if 'reminder' in config_key.lower():
+        category = 'reminders'
+    elif 'follow' in config_key.lower() or 'task' in config_key.lower():
+        category = 'tasks'
+    elif 'email' in config_key.lower():
+        category = 'email'
+    elif 'calendar' in config_key.lower():
+        category = 'calendar'
+
+    # Set the configuration
+    success = behavior_service.set(
+        key=config_key,
+        value=config_value,
+        category=category,
+        updated_by=f"{user['first_name']} (via message)"
+    )
+
+    if success:
+        response = f"""✅ Configuration updated!
+
+**{config_key}** = `{config_value}`
+
+This setting will be used by the system immediately where applicable."""
+    else:
+        response = f"❌ Failed to update configuration: {config_key}"
+
+    if existing_message:
+        await existing_message.edit_text(response, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+    if user:
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+
+async def handle_meta_extend(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle meta-command to generate new code/features."""
+    user_service = UserService()
+    llm = get_llm_service()
+
+    # Only owner can extend functionality
+    if not user['is_owner']:
+        response = "⛔ Only the owner can extend system functionality."
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    feature_name = entities.get('feature_name') or 'new_feature'
+    feature_description = entities.get('feature_description') or entities.get('description') or original_message
+
+    # Generate code using LLM
+    code_gen_prompt = f"""You are generating a new handler function for a Telegram bot assistant.
+
+**Feature Request:**
+{feature_description}
+
+**Architecture Context:**
+- Bot uses python-telegram-bot library
+- Handlers are async functions with signature: async def handle_X(update, context, entities, original_message, existing_message=None, user=None)
+- Services available: TodoService, CalendarService, EmailService, UserService, PromptService, BehaviorConfigService
+- Database uses SQLAlchemy ORM
+- User info comes from user dict with keys: telegram_id, first_name, is_owner, is_authorized
+
+**Your Task:**
+Generate a complete, working handler function for this feature. Include:
+1. Imports if needed (relative imports from assistant.services or assistant.db)
+2. The handler function with proper error handling
+3. User authorization checks if appropriate
+4. Conversation history logging
+5. Comments explaining the logic
+
+Return ONLY the Python code for the handler function, properly formatted."""
+
+    try:
+        generated_code = llm.process_message(code_gen_prompt)
+
+        # Clean up markdown code blocks
+        import re
+        generated_code = re.sub(r'^```python\n', '', generated_code)
+        generated_code = re.sub(r'^```\n', '', generated_code)
+        generated_code = re.sub(r'\n```$', '', generated_code)
+        generated_code = generated_code.strip()
+
+        # Save to a new file in assistant/bot/handlers/
+        file_name = f"meta_{feature_name.lower().replace(' ', '_')}.py"
+        file_path = f"/home/ja/projects/personal_assistant/assistant/bot/handlers/{file_name}"
+
+        # Show preview first
+        preview = generated_code[:800] + "\n\n... (truncated)" if len(generated_code) > 800 else generated_code
+
+        response = f"""🔧 **Feature Generation Complete**
+
+**Feature:** {feature_name}
+
+**Generated Code Preview:**
+```python
+{preview}
+```
+
+**Next Steps:**
+1. Review the code above
+2. The full code has been saved to: `{file_path}`
+3. To activate:
+   - Add the handler to `bot/main.py`
+   - Add the intent to the parser prompt
+   - Restart the bot: `sudo systemctl restart personal-assistant`
+
+Would you like me to save this code? Reply 'yes' to confirm."""
+
+        if existing_message:
+            await existing_message.edit_text(response, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(response, parse_mode="Markdown")
+
+        # Store generated code in user's conversation for potential retrieval
+        user_service.add_conversation(
+            user['telegram_id'],
+            "assistant",
+            f"[Generated code for {feature_name}]\n\n{generated_code}"
+        )
+
+        # Also save to file immediately (owner can review/delete if unwanted)
+        try:
+            with open(file_path, 'w') as f:
+                f.write(f'"""{feature_description}"""\n\n')
+                f.write(generated_code)
+            logger.info(f"Saved generated handler to {file_path}")
+        except Exception as e:
+            logger.error(f"Error saving generated code: {e}")
+
+    except Exception as e:
+        logger.error(f"Error generating code: {e}")
+        response = f"❌ Error generating code: {str(e)}"
+
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+
     if user:
         user_service.add_conversation(user['telegram_id'], "assistant", response)
 
@@ -784,3 +1487,256 @@ async def reject_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
     except Exception as e:
         logger.error(f"Error notifying requester of rejection: {e}")
+
+
+async def authorize_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Authorize a user to execute tasks (owner only)."""
+    user_service = UserService()
+
+    # Get user ID from command
+    if not context.args:
+        await update.message.reply_text("Usage: /authorize <user_id>")
+        return
+
+    try:
+        user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID. Must be a number.")
+        return
+
+    # Get user details
+    user = user_service.get_user_by_id(user_id)
+    if not user:
+        await update.message.reply_text(f"❌ User with ID {user_id} not found.")
+        return
+
+    # Check if already authorized
+    if user['is_authorized']:
+        await update.message.reply_text(f"ℹ️ {user['first_name']} is already authorized.")
+        return
+
+    # Authorize the user
+    success = user_service.authorize_user(user_id)
+
+    if success:
+        await update.message.reply_text(
+            f"✅ Authorized {user['first_name']} (ID: {user_id})\n\n"
+            f"They can now execute tasks through {BOT_NAME}."
+        )
+
+        # Notify the user they've been authorized
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"🎉 You've been authorized by my owner!\n\n"
+                     f"You can now ask me to manage your todos and set up reminders. "
+                     f"Try saying things like:\n"
+                     f"• 'Add a todo: buy groceries'\n"
+                     f"• 'Show my tasks'\n"
+                     f"• 'Remind me tomorrow at 3pm to call mom'"
+            )
+        except Exception as e:
+            logger.warning(f"Could not notify user {user_id} about authorization: {e}")
+    else:
+        await update.message.reply_text(f"❌ Failed to authorize user.")
+
+
+async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Block/revoke authorization for a user (owner only)."""
+    user_service = UserService()
+
+    # Get user ID from command
+    if not context.args:
+        await update.message.reply_text("Usage: /block <user_id>")
+        return
+
+    try:
+        user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID. Must be a number.")
+        return
+
+    # Get user details
+    user = user_service.get_user_by_id(user_id)
+    if not user:
+        await update.message.reply_text(f"❌ User with ID {user_id} not found.")
+        return
+
+    # Check if user is owner
+    if user['is_owner']:
+        await update.message.reply_text("❌ Cannot block the owner.")
+        return
+
+    # Check if already blocked
+    if not user['is_authorized']:
+        await update.message.reply_text(f"ℹ️ {user['first_name']} is already blocked.")
+        return
+
+    # Revoke authorization
+    success = user_service.revoke_authorization(user_id)
+
+    if success:
+        await update.message.reply_text(
+            f"🚫 Blocked {user['first_name']} (ID: {user_id})\n\n"
+            f"They can no longer execute tasks through {BOT_NAME}."
+        )
+
+        # Notify the user they've been blocked
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"Your authorization has been revoked.\n\n"
+                     f"You can still send messages, but I cannot execute tasks on your behalf anymore."
+            )
+        except Exception as e:
+            logger.warning(f"Could not notify user {user_id} about revocation: {e}")
+    else:
+        await update.message.reply_text(f"❌ Failed to block user.")
+
+
+async def view_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View current system prompts (owner only)."""
+    prompt_service = PromptService()
+
+    if not context.args:
+        # Show both prompts
+        personality = prompt_service.get_personality_prompt()
+        parser = prompt_service.get_parser_prompt()
+
+        response = f"""**Current System Prompts:**
+
+📝 **Personality Prompt** (use `/viewprompt personality` to see full):
+```
+{personality[:200]}...
+```
+
+🔍 **Parser Prompt** (use `/viewprompt parser` to see full):
+```
+{parser[:200]}...
+```
+
+**Commands:**
+• `/viewprompt personality` - View full personality prompt
+• `/viewprompt parser` - View full parser prompt
+• `/setprompt <type>` - Set a new prompt (interactive)
+• `/resetprompt <type>` - Reset to default"""
+
+        await update.message.reply_text(response, parse_mode="Markdown")
+        return
+
+    prompt_type = context.args[0].lower()
+
+    if prompt_type in ['personality', 'p']:
+        prompt = prompt_service.get_personality_prompt()
+        response = f"**Current Personality Prompt:**\n\n```\n{prompt}\n```"
+    elif prompt_type in ['parser', 'command', 'c']:
+        prompt = prompt_service.get_parser_prompt()
+        response = f"**Current Parser Prompt:**\n\n```\n{prompt}\n```"
+    else:
+        response = "❌ Invalid prompt type. Use 'personality' or 'parser'."
+
+    await update.message.reply_text(response, parse_mode="Markdown")
+
+
+async def set_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set a system prompt (owner only)."""
+    prompt_service = PromptService()
+
+    # Get the full message text after /setprompt <type>
+    if not context.args:
+        response = """**Set System Prompt**
+
+Usage: `/setprompt <type> <new_prompt>`
+
+Types:
+• `personality` - Conversational personality prompt
+• `parser` - Command parsing prompt
+
+Example:
+```
+/setprompt personality You are a friendly and helpful assistant named Jarvis.
+```
+
+Or send the prompt in a follow-up message after using:
+`/setprompt personality`"""
+        await update.message.reply_text(response, parse_mode="Markdown")
+        return
+
+    prompt_type = context.args[0].lower()
+
+    # Get the new prompt (everything after the type)
+    message_parts = update.message.text.split(maxsplit=2)
+    if len(message_parts) < 3:
+        response = f"""**Ready to set {prompt_type} prompt**
+
+Please send your new prompt text in your next message."""
+        await update.message.reply_text(response, parse_mode="Markdown")
+        # TODO: Implement state management for multi-message prompt setting
+        return
+
+    new_prompt = message_parts[2]
+
+    if prompt_type in ['personality', 'p']:
+        success = prompt_service.set_personality_prompt(new_prompt)
+        prompt_name = "personality"
+    elif prompt_type in ['parser', 'command', 'c']:
+        success = prompt_service.set_parser_prompt(new_prompt)
+        prompt_name = "parser"
+    else:
+        await update.message.reply_text("❌ Invalid prompt type. Use 'personality' or 'parser'.")
+        return
+
+    if success:
+        response = f"""✅ {prompt_name.capitalize()} prompt updated!
+
+New prompt:
+```
+{new_prompt[:300]}{"..." if len(new_prompt) > 300 else ""}
+```
+
+The changes will take effect immediately for new conversations."""
+    else:
+        response = f"❌ Failed to update {prompt_name} prompt."
+
+    await update.message.reply_text(response, parse_mode="Markdown")
+
+
+async def reset_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reset a system prompt to default (owner only)."""
+    prompt_service = PromptService()
+
+    if not context.args:
+        response = """**Reset System Prompt**
+
+Usage: `/resetprompt <type>`
+
+Types:
+• `personality` - Reset personality prompt to default
+• `parser` - Reset parser prompt to default
+• `all` - Reset both prompts to defaults"""
+        await update.message.reply_text(response, parse_mode="Markdown")
+        return
+
+    prompt_type = context.args[0].lower()
+
+    if prompt_type in ['personality', 'p']:
+        success = prompt_service.reset_personality_prompt()
+        prompt_name = "personality"
+    elif prompt_type in ['parser', 'command', 'c']:
+        success = prompt_service.reset_parser_prompt()
+        prompt_name = "parser"
+    elif prompt_type == 'all':
+        success1 = prompt_service.reset_personality_prompt()
+        success2 = prompt_service.reset_parser_prompt()
+        success = success1 and success2
+        prompt_name = "all"
+    else:
+        await update.message.reply_text("❌ Invalid prompt type. Use 'personality', 'parser', or 'all'.")
+        return
+
+    if success:
+        response = f"✅ {prompt_name.capitalize()} prompt(s) reset to default!"
+    else:
+        response = f"❌ Failed to reset {prompt_name} prompt(s)."
+
+    await update.message.reply_text(response, parse_mode="Markdown")

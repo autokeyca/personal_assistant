@@ -81,6 +81,15 @@ def create_bot() -> Application:
     app.add_handler(CommandHandler("approve", intelligent.approve_request, filters=user_filter))
     app.add_handler(CommandHandler("reject", intelligent.reject_request, filters=user_filter))
 
+    # User authorization commands (owner only)
+    app.add_handler(CommandHandler("authorize", intelligent.authorize_user, filters=user_filter))
+    app.add_handler(CommandHandler("block", intelligent.block_user, filters=user_filter))
+
+    # Prompt management commands (owner only)
+    app.add_handler(CommandHandler("viewprompt", intelligent.view_prompt, filters=user_filter))
+    app.add_handler(CommandHandler("setprompt", intelligent.set_prompt, filters=user_filter))
+    app.add_handler(CommandHandler("resetprompt", intelligent.reset_prompt, filters=user_filter))
+
     # Handle voice messages (from anyone - authorization checked in handler)
     app.add_handler(MessageHandler(
         filters.VOICE,
@@ -129,13 +138,20 @@ def run_bot():
 
     Path(log_file).parent.mkdir(parents=True, exist_ok=True)
 
+    # Time-based rotating file handler (keep logs for 24 hours)
+    file_handler = logging.handlers.TimedRotatingFileHandler(
+        log_file,
+        when='midnight',  # Rotate at midnight
+        interval=1,       # Every 1 day
+        backupCount=1     # Keep only 1 backup (24 hours worth)
+    )
+    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+
     logging.basicConfig(
         level=getattr(logging, log_level),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
-            logging.handlers.RotatingFileHandler(
-                log_file, maxBytes=5_000_000, backupCount=3
-            ),
+            file_handler,
             logging.StreamHandler(),
         ],
     )

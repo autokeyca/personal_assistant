@@ -7,6 +7,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Import PromptService for loading prompts
+from assistant.services.prompt import PromptService
+
 
 class LLMService:
     """Service for interacting with Gemini LLM."""
@@ -65,48 +68,25 @@ class LLMService:
         try:
             # Build context from recent conversation
             context_str = ""
+            last_assistant_message = ""
             if conversation_context:
                 context_str = "\n\nRecent conversation context:\n"
-                for conv in conversation_context[-3:]:  # Last 3 messages
+                for conv in conversation_context[-5:]:  # Last 5 messages for better context
                     role = conv.get('role', 'unknown')
                     msg = conv.get('message', '')
                     channel = conv.get('channel', 'unknown')
-                    context_str += f"- {role} ({channel}): {msg[:100]}\n"
+                    context_str += f"- {role} ({channel}): {msg[:200]}\n"
 
-            prompt = f"""Parse this message and extract the intent and entities.
-{context_str}
-Return ONLY a JSON object with this structure:
-{{
-    "intent": "one of: todo_add, todo_list, todo_complete, todo_delete, calendar_add, calendar_list, reminder_add, telegram_message, email_send, email_check, help, general_chat",
-    "entities": {{
-        "title": "extracted title/subject",
-        "description": "extracted description or message content",
-        "date": "extracted date in YYYY-MM-DD format",
-        "time": "extracted time in HH:MM format",
-        "priority": "high/medium/low if mentioned",
-        "recipient": "recipient name or identifier",
-        "subject": "email subject line if mentioned",
-        "body": "message body/content",
-        "duration": "event duration if mentioned"
-    }},
-    "confidence": 0.95
-}}
+                    # Track the most recent assistant message for pronoun resolution
+                    if role == 'assistant':
+                        last_assistant_message = msg
 
-Message: {message}
+            # Load parser prompt from database
+            prompt_service = PromptService()
+            parser_template = prompt_service.get_parser_prompt()
 
-Important:
-- Only include entities that are actually present in the message
-- Use null for missing entities
-- For dates, interpret "tomorrow", "next week", etc. relative to today
-- For times, use 24-hour format
-- CRITICAL: Use "telegram_message" for sending Telegram messages (e.g., "send X a message", "tell Y that...", "message Z")
-- CRITICAL: Use "email_send" ONLY when explicitly mentioning "email" or when recipient is an email address
-- CRITICAL: When user says "respond" without specifying channel, look at the conversation context:
-  - If last message was via telegram channel → use "telegram_message"
-  - If last message was via email channel → use "email_send"
-  - Use the sender's name from context as the recipient
-- If the message is conversational/chat, use "general_chat" intent
-"""
+            # Format the prompt with context and message
+            prompt = parser_template.format(context=context_str, message=message)
 
             response = self.model.generate_content(prompt)
             result = self._parse_json_response(response.text)

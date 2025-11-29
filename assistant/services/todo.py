@@ -18,6 +18,9 @@ class TodoService:
         priority: str = "medium",
         due_date: datetime = None,
         tags: List[str] = None,
+        user_id: int = None,
+        created_by: int = None,
+        follow_up_intensity: str = None,
     ) -> Todo:
         """Add a new todo item."""
         with get_session() as session:
@@ -25,12 +28,25 @@ class TodoService:
             if priority is None:
                 priority = "medium"
 
+            # Get default follow-up intensity from user if not specified
+            if follow_up_intensity is None and user_id:
+                from assistant.db import User
+                user = session.query(User).filter_by(telegram_id=user_id).first()
+                if user:
+                    follow_up_intensity = user.default_followup_intensity or 'medium'
+
+            if follow_up_intensity is None:
+                follow_up_intensity = 'medium'
+
             todo = Todo(
                 title=title,
                 description=description,
                 priority=Priority(priority.lower()),
                 due_date=due_date,
                 tags=",".join(tags) if tags else None,
+                user_id=user_id,
+                created_by=created_by,
+                follow_up_intensity=follow_up_intensity,
             )
             session.add(todo)
             session.flush()
@@ -43,10 +59,16 @@ class TodoService:
         include_completed: bool = False,
         tag: str = None,
         limit: int = 50,
+        user_id: int = None,
+        all_users: bool = False,
     ) -> List[dict]:
         """List todo items with optional filters."""
         with get_session() as session:
             query = session.query(Todo)
+
+            # Filter by user_id unless all_users is True
+            if not all_users and user_id is not None:
+                query = query.filter(Todo.user_id == user_id)
 
             if status:
                 query = query.filter(Todo.status == TodoStatus(status))
@@ -230,3 +252,54 @@ class TodoService:
                 "message": reminder.message,
                 "remind_at": reminder.remind_at.isoformat(),
             }
+
+    def get_todos_by_user_name(self, first_name: str) -> List[dict]:
+        """Get all todos for a user by their first name."""
+        with get_session() as session:
+            from assistant.db import User
+
+            # Find user by first name (case-insensitive)
+            user = session.query(User).filter(
+                User.first_name.ilike(first_name)
+            ).first()
+
+            if not user:
+                return []
+
+            return self.list(user_id=user.telegram_id)
+
+    def get_all_users_with_todos(self) -> List[dict]:
+        """Get all users who have todos."""
+        with get_session() as session:
+            from assistant.db import User
+
+            # Get users who have at least one todo
+            users_with_todos = session.query(User).join(
+                Todo, User.telegram_id == Todo.user_id
+            ).distinct().all()
+
+            return [
+                {
+                    'telegram_id': user.telegram_id,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'full_name': user.full_name,
+                    'todo_count': len(self.list(user_id=user.telegram_id))
+                }
+                for user in users_with_todos
+            ]
+
+    def get_overdue_todos(self, user_id: int = None) -> List[dict]:
+        """Get all overdue todos, optionally filtered by user."""
+        with get_session() as session:
+            now = datetime.utcnow()
+            query = session.query(Todo).filter(
+                Todo.due_date < now,
+                Todo.status.in_([TodoStatus.PENDING, TodoStatus.IN_PROGRESS])
+            )
+
+            if user_id:
+                query = query.filter(Todo.user_id == user_id)
+
+            todos = query.order_by(Todo.due_date.asc()).all()
+            return [t.to_dict() for t in todos]
