@@ -603,7 +603,12 @@ async def handle_todo_complete(update, context, entities, original_message, exis
         todo_id = int(title)
         todo = todo_service.get(todo_id)
 
-        if todo and todo['user_id'] == user['telegram_id'] and todo['status'] != 'completed':
+        # Owner can complete anyone's tasks, others can only complete their own
+        can_complete = todo and todo['status'] != 'completed' and (
+            user['is_owner'] or todo['user_id'] == user['telegram_id']
+        )
+
+        if can_complete:
             # Complete the task
             active = todo_service.get_active_task()
             is_focused = active and active['id'] == todo_id
@@ -634,8 +639,11 @@ async def handle_todo_complete(update, context, entities, original_message, exis
         # Search for matching todo by title
         todos = todo_service.search(title)
 
-        # Filter to only this user's pending todos
-        user_todos = [t for t in todos if t['user_id'] == user['telegram_id'] and t['status'] != 'completed']
+        # Filter to pending todos (owner can complete anyone's, others only their own)
+        if user['is_owner']:
+            user_todos = [t for t in todos if t['status'] != 'completed']
+        else:
+            user_todos = [t for t in todos if t['user_id'] == user['telegram_id'] and t['status'] != 'completed']
 
         if user_todos:
             todo_id = user_todos[0]['id']
