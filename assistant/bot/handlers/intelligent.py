@@ -484,7 +484,11 @@ async def handle_todo_add(update, context, entities, original_message, existing_
         response += f"\n\n{format_todo_list(todos, title=list_title)}"
     else:
         # Task added for self
-        todos = todo_service.list(user_id=target_user_id, include_completed=False)
+        # Owner sees all tasks, regular users see only their own
+        if user['is_owner']:
+            todos = todo_service.list(all_users=True, include_completed=False)
+        else:
+            todos = todo_service.list(user_id=target_user_id, include_completed=False)
         response = f"✅ Added: {todo['title']}"
         if priority and priority != 'medium':
             response += f" ({priority} priority)"
@@ -540,6 +544,10 @@ async def handle_todo_list(update, context, entities, existing_message=None, use
     # Get todos
     if show_all:
         todos = todo_service.list(all_users=True, include_completed=False)
+    elif user['is_owner'] and not user_name:
+        # Owner sees all tasks by default unless asking for specific user
+        todos = todo_service.list(all_users=True, include_completed=False)
+        list_title = "All Todos"
     else:
         todos = todo_service.list(user_id=target_user_id, include_completed=False)
 
