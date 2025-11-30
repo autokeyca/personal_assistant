@@ -59,6 +59,14 @@ modules:
       allow_code_generation: true
       allow_behavior_config: true
 
+  # Custom/Example modules
+  notes:
+    enabled: true
+    priority: 15
+    config:
+      max_notes: 50
+      auto_delete_days: 30
+
 # Module loading settings
 module_settings:
   auto_reload: false  # Auto-reload modules on file change (dev mode)
