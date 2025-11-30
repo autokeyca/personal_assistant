@@ -17,7 +17,7 @@ DEFAULT_PARSER_PROMPT = """Parse this message and extract the intent and entitie
 {context}
 Return ONLY a JSON object with this structure:
 {{
-    "intent": "one of: todo_add, todo_list, todo_complete, todo_delete, todo_focus, calendar_add, calendar_list, reminder_add, telegram_message, email_send, email_check, help, general_chat, meta_modify_prompt, meta_configure, meta_extend",
+    "intent": "one of: todo_add, todo_list, todo_complete, todo_delete, todo_focus, todo_set_reminder, calendar_add, calendar_list, reminder_add, telegram_message, email_send, email_check, help, general_chat, meta_modify_prompt, meta_configure, meta_extend",
     "entities": {{
         "title": "extracted title/subject",
         "description": "extracted description or message content",
@@ -31,6 +31,7 @@ Return ONLY a JSON object with this structure:
         "for_user": "user name if task is for someone (e.g., 'for Sarah' → 'Sarah')",
         "user_name": "user name when querying someone's todos (e.g., 'Sarah's todos' → 'Sarah')",
         "intensity": "follow-up intensity if mentioned (none/low/medium/high/urgent)",
+        "frequency": "for todo_set_reminder: natural language frequency (e.g., 'every 2 hours during business hours')",
         "prompt_type": "for meta_modify_prompt: personality or parser",
         "modification": "for meta_modify_prompt: description of what to change",
         "config_key": "for meta_configure: setting name to change",
@@ -69,6 +70,12 @@ Important:
 - CRITICAL: Use "todo_focus" when user wants to focus on a task (e.g., "focus on 9", "focus 9", "focus on buy milk task")
   - For "focus 9" or "focus on 9", extract "9" as the title
   - For "focus on buy milk", extract "buy milk" as the title
+- CRITICAL: Use "todo_set_reminder" when user wants to set a custom reminder schedule for a task
+  - Examples: "remind Sarah about her task every 2 hours", "remind Luke every hour during business hours", "set reminder for cleanup task every 30 minutes"
+  - Extract the task identifier (user name, task title, or task ID) and the frequency expression
+  - If user mentions a recipient/user, extract as "for_user" or "user_name"
+  - Extract the full frequency expression as "frequency" (e.g., "every 2 hours during business hours", "every day at 9am", "every 30 minutes on weekdays")
+  - If context shows a recent task was added for someone, use that task
 - CRITICAL: Use "telegram_message" for sending Telegram messages (e.g., "send X a message", "tell Y that...", "message Z")
 - CRITICAL: Use "email_send" ONLY when explicitly mentioning "email" or when recipient is an email address
 - CRITICAL: When user says "respond" without specifying channel, look at the conversation context:

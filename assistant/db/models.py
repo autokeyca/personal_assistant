@@ -46,6 +46,10 @@ class Todo(Base):
     last_followup_at = Column(DateTime, nullable=True)
     next_followup_at = Column(DateTime, nullable=True)
 
+    # Custom reminder configuration (JSON-encoded FrequencyParser config)
+    reminder_config = Column(Text, nullable=True)  # JSON: {interval_value, interval_unit, time_range, days, enabled}
+    last_reminder_at = Column(DateTime, nullable=True)  # Track when last reminder was sent
+
     def __repr__(self):
         return f"<Todo(id={self.id}, title='{self.title[:30]}...', status={self.status.value})>"
 
@@ -64,6 +68,8 @@ class Todo(Base):
             "follow_up_intensity": self.follow_up_intensity,
             "last_followup_at": self.last_followup_at.isoformat() if self.last_followup_at else None,
             "next_followup_at": self.next_followup_at.isoformat() if self.next_followup_at else None,
+            "reminder_config": self.reminder_config,
+            "last_reminder_at": self.last_reminder_at.isoformat() if self.last_reminder_at else None,
         }
 
 

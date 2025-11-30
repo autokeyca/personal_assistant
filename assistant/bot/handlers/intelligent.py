@@ -309,6 +309,9 @@ async def process_natural_language(
         elif intent == 'todo_focus':
             await handle_todo_focus(update, context, entities, message, existing_message, user)
 
+        elif intent == 'todo_set_reminder':
+            await handle_todo_set_reminder(update, context, entities, message, existing_message, user)
+
         elif intent == 'calendar_add':
             await handle_calendar_add(update, context, entities, message, existing_message, user)
 
@@ -884,6 +887,129 @@ async def handle_calendar_list(update, context, entities, existing_message=None,
         user_service.add_conversation(user['telegram_id'], "assistant", response)
 
 
+async def handle_todo_set_reminder(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle setting a custom reminder frequency for a todo task."""
+    from assistant.services import TodoService, UserService, FrequencyParser
+    from assistant.db import get_session, Todo
+    import json
+
+    user_service = UserService()
+    todo_service = TodoService()
+    frequency_parser = FrequencyParser()
+
+    # Extract entities
+    frequency = entities.get('frequency')
+    title = entities.get('title')
+    user_name = entities.get('user_name') or entities.get('for_user')
+
+    if not frequency:
+        response = "❌ I couldn't understand the reminder frequency. Try: 'remind Luke every 2 hours during business hours'"
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    # Parse the frequency expression
+    frequency_config = frequency_parser.parse(frequency)
+    if not frequency_config:
+        response = f"❌ I couldn't parse the frequency '{frequency}'. Try something like 'every 2 hours' or 'every day at 9am'."
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    # Find the target user
+    target_user_id = None
+    if user_name:
+        target_user = user_service.get_user_by_name(user_name)
+        if target_user:
+            target_user_id = target_user.telegram_id
+        else:
+            response = f"❌ User '{user_name}' not found."
+            if existing_message:
+                await existing_message.edit_text(response)
+            else:
+                await update.message.reply_text(response)
+            if user:
+                user_service.add_conversation(user['telegram_id'], "assistant", response)
+            return
+
+    # Find the todo task
+    todo_id = None
+    todo = None
+
+    # If title is provided, search for it
+    if title:
+        # Check if title is a number (task ID)
+        if title.isdigit():
+            todo_id = int(title)
+            todo_dict = todo_service.get(todo_id)
+            if todo_dict and (target_user_id is None or todo_dict['user_id'] == target_user_id):
+                todo = todo_dict
+        else:
+            # Search by title
+            search_results = todo_service.search(title, user_id=target_user_id)
+            if search_results:
+                todo = search_results[0]
+                todo_id = todo['id']
+
+    # If no todo found and user_name is specified, get their most recent task
+    if not todo and target_user_id:
+        todos = todo_service.list(user_id=target_user_id, include_completed=False, limit=1)
+        if todos:
+            todo = todos[0]
+            todo_id = todo['id']
+
+    if not todo:
+        response = "❌ I couldn't find which task to set reminders for. Try: 'remind Luke about cleanup task every 2 hours'"
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    # Store the reminder config in the database
+    with get_session() as session:
+        db_todo = session.query(Todo).filter(Todo.id == todo_id).first()
+        if db_todo:
+            db_todo.reminder_config = json.dumps(frequency_config)
+            session.commit()
+
+            # Generate confirmation message
+            frequency_description = frequency_parser.describe(frequency_config)
+            task_owner = ""
+            if db_todo.user_id and db_todo.user_id != user['telegram_id']:
+                owner_user = user_service.get_user(db_todo.user_id)
+                if owner_user:
+                    task_owner = f" for {owner_user.first_name}"
+
+            response = (
+                f"✅ Reminder set{task_owner}!\n\n"
+                f"📋 Task: {db_todo.title}\n"
+                f"⏰ Frequency: {frequency_description}\n\n"
+                f"I'll remind about this task according to this schedule."
+            )
+        else:
+            response = f"❌ Task #{todo_id} not found in database."
+
+    if existing_message:
+        await existing_message.edit_text(response, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+    # Save response to conversation history
+    if user:
+        user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+
 async def handle_reminder_add(update, context, entities, original_message, existing_message=None, user=None):
     """Handle adding a reminder."""
     from assistant.db import get_session
@@ -900,7 +1026,7 @@ async def handle_reminder_add(update, context, entities, original_message, exist
         else:
             await update.message.reply_text(response)
         if user:
-            user_service.add_conversation(user.telegram_id, "assistant", response)
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
         return
 
     # Parse the time (simplified - you might want to enhance this)
@@ -948,7 +1074,7 @@ async def handle_email_send(update, context, entities, original_message, existin
         else:
             await update.message.reply_text(response)
         if user:
-            user_service.add_conversation(user.telegram_id, "assistant", response)
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
         return
 
     if not body:

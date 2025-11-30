@@ -7,8 +7,8 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 from assistant.config import get
-from assistant.db import get_session, Reminder
-from assistant.services import EmailService, CalendarService, TodoService
+from assistant.db import get_session, Reminder, Todo
+from assistant.services import EmailService, CalendarService, TodoService, FrequencyParser
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,82 @@ async def check_reminders(bot: Bot):
 
             except TelegramError as e:
                 logger.error(f"Failed to send reminder {reminder.id}: {e}")
+
+
+async def check_todo_reminders(bot: Bot):
+    """Check for todos with custom reminder schedules and send reminders."""
+    from assistant.services import UserService
+    import json
+
+    tz_name = get("timezone", "America/Montreal")
+    tz = pytz.timezone(tz_name)
+    frequency_parser = FrequencyParser()
+    user_service = UserService()
+
+    with get_session() as session:
+        now = datetime.now(tz)
+
+        # Get all todos with reminder configs that are not completed
+        todos_with_reminders = (
+            session.query(Todo)
+            .filter(
+                Todo.reminder_config.isnot(None),
+                Todo.status != 'completed',
+            )
+            .all()
+        )
+
+        for todo in todos_with_reminders:
+            try:
+                # Parse the reminder config
+                reminder_config = json.loads(todo.reminder_config)
+
+                # Check if we should send a reminder now
+                should_remind = frequency_parser.should_remind_now(
+                    reminder_config,
+                    todo.last_reminder_at
+                )
+
+                if should_remind:
+                    # Get the task owner
+                    owner = user_service.get_user(todo.user_id) if todo.user_id else None
+                    owner_name = owner.first_name if owner else "You"
+                    owner_chat_id = owner.telegram_id if owner else get("telegram.authorized_user_id")
+
+                    # Format reminder message
+                    frequency_desc = frequency_parser.describe(reminder_config)
+                    priority_icon = {
+                        "urgent": " ‼️",
+                        "high": " ❗",
+                        "medium": "",
+                        "low": "",
+                    }.get(todo.priority.value, "")
+
+                    text = (
+                        f"🔔 *Task Reminder*\n\n"
+                        f"`#{todo.id}` {todo.title}{priority_icon}\n"
+                    )
+
+                    if todo.description:
+                        text += f"\n_{todo.description}_\n"
+
+                    text += f"\n⏰ {frequency_desc}"
+
+                    # Send reminder
+                    await bot.send_message(
+                        chat_id=owner_chat_id,
+                        text=text,
+                        parse_mode="Markdown",
+                    )
+
+                    # Update last reminder timestamp
+                    todo.last_reminder_at = now
+                    session.commit()
+
+                    logger.info(f"Sent custom reminder for todo #{todo.id} to {owner_name}")
+
+            except Exception as e:
+                logger.error(f"Error processing reminder for todo #{todo.id}: {e}")
 
 
 async def check_emails(bot: Bot):
@@ -187,6 +263,14 @@ def setup_scheduler(app):
         interval=reminder_interval * 60,
         first=10,  # Start after 10 seconds
         name="check_reminders",
+    )
+
+    # Check todo custom reminders every minute
+    job_queue.run_repeating(
+        lambda context: check_todo_reminders(context.bot),
+        interval=60,  # Every minute
+        first=15,  # Start after 15 seconds
+        name="check_todo_reminders",
     )
 
     # Check emails every 5 minutes
