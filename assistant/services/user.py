@@ -255,11 +255,47 @@ class UserService:
             session.commit()
             return True
 
+    def get_user(self, telegram_id: int):
+        """
+        Get user by Telegram ID (returns User object, not dict).
+
+        Args:
+            telegram_id: Telegram user ID
+
+        Returns:
+            User object or None
+        """
+        with get_session() as session:
+            user = session.query(User).filter_by(telegram_id=telegram_id).first()
+            if user:
+                # Detach from session
+                session.expunge(user)
+            return user
+
     def get_user_by_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
         """Get user information by Telegram ID."""
         with get_session() as session:
             user = session.query(User).filter_by(telegram_id=telegram_id).first()
             return user.to_dict() if user else None
+
+    def get_user_by_name(self, name: str):
+        """
+        Get user by first name (case-insensitive search).
+
+        Args:
+            name: First name to search for
+
+        Returns:
+            User object or None
+        """
+        with get_session() as session:
+            user = session.query(User).filter(
+                User.first_name.ilike(f"%{name}%")
+            ).first()
+            if user:
+                # Detach from session
+                session.expunge(user)
+            return user
 
     def get_all_users(self) -> List[Dict[str, Any]]:
         """Get all users who have interacted with Jarvis."""
