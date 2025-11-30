@@ -12,10 +12,50 @@ from telegram.ext import (
 from assistant.config import get
 from assistant.db import init_db
 from assistant.scheduler import setup_scheduler
+from assistant.core.module_loader import ModuleLoader
+from assistant.core.module_system import registry
 
 from .handlers import todo, calendar, email, reminders, general, intelligent
 
 logger = logging.getLogger(__name__)
+
+
+async def modules_command(update, context):
+    """Show loaded modules and their status."""
+    from assistant.core.module_loader import ModuleLoader
+
+    loader = ModuleLoader("modules_config.yaml")
+    status = loader.get_module_status()
+
+    response = f"**Jarvis Modular System**\n\n"
+    response += f"📊 Status: {status['enabled_modules']}/{status['total_modules']} modules loaded\n\n"
+
+    # Group by category
+    owner_modules = []
+    public_modules = []
+
+    for module in status['modules']:
+        if module['enabled']:
+            if module['owner_only']:
+                owner_modules.append(module)
+            else:
+                public_modules.append(module)
+
+    if owner_modules:
+        response += "**Owner-Only Modules:**\n"
+        for module in owner_modules:
+            response += f"✅ {module['display_name']} v{module['version']}\n"
+            response += f"   _{module['description']}_\n\n"
+
+    if public_modules:
+        response += "**Public Modules:**\n"
+        for module in public_modules:
+            response += f"✅ {module['display_name']} v{module['version']}\n"
+            response += f"   _{module['description']}_\n\n"
+
+    response += "💡 Modules are configured in `modules_config.yaml`"
+
+    await update.message.reply_text(response, parse_mode="Markdown")
 
 
 def create_bot() -> Application:
@@ -30,6 +70,19 @@ def create_bot() -> Application:
     # Initialize database
     db_path = get("database.path")
     init_db(db_path)
+
+    # Load modular system
+    logger.info("Loading modular plugin system...")
+    module_loader = ModuleLoader("modules_config.yaml")
+    module_loader.load_all_modules()
+
+    status = module_loader.get_module_status()
+    logger.info(f"Loaded {status['enabled_modules']}/{status['total_modules']} modules")
+
+    for module_info in status['modules']:
+        if module_info['enabled']:
+            owner_badge = " [OWNER-ONLY]" if module_info['owner_only'] else ""
+            logger.info(f"  ✓ {module_info['display_name']} v{module_info['version']}{owner_badge}")
 
     # Create application
     app = Application.builder().token(token).build()
@@ -89,6 +142,9 @@ def create_bot() -> Application:
     app.add_handler(CommandHandler("viewprompt", intelligent.view_prompt, filters=user_filter))
     app.add_handler(CommandHandler("setprompt", intelligent.set_prompt, filters=user_filter))
     app.add_handler(CommandHandler("resetprompt", intelligent.reset_prompt, filters=user_filter))
+
+    # Module management commands (owner only)
+    app.add_handler(CommandHandler("modules", modules_command, filters=user_filter))
 
     # Handle voice messages (from anyone - authorization checked in handler)
     app.add_handler(MessageHandler(

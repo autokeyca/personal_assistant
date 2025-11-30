@@ -29,6 +29,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /help - Show this help
 /status - Show assistant status
 /briefing - Get your daily briefing
+/modules - View loaded plugin modules
 
 *Todos:*
 /todo - List active todos
