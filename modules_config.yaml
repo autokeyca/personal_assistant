@@ -1,0 +1,66 @@
+# Jarvis Module Configuration
+# Enable/disable and configure modules here
+
+modules:
+  # Core personal assistant modules
+  todo:
+    enabled: true
+    priority: 10
+    config:
+      default_priority: medium
+      show_completed: false
+      follow_up_enabled: true
+
+  reminders:
+    enabled: true
+    priority: 20
+    config:
+      check_interval: 60  # seconds
+      reminder_lookahead: 300  # 5 minutes
+
+  calendar:
+    enabled: true
+    priority: 30
+    owner_only: true
+    config:
+      default_event_duration: 60  # minutes
+      notification_minutes: 15
+
+  email:
+    enabled: true
+    priority: 40
+    owner_only: true
+    config:
+      check_interval: 300  # 5 minutes
+      max_results: 10
+
+  # Communication modules
+  telegram_relay:
+    enabled: true
+    priority: 50
+    config:
+      allow_guest_messages: true
+
+  # Advanced modules
+  employee_management:
+    enabled: true
+    priority: 60
+    owner_only: true
+    config:
+      enable_task_assignment: true
+      enable_approvals: true
+
+  meta_programming:
+    enabled: true
+    priority: 100
+    owner_only: true
+    config:
+      allow_prompt_modification: true
+      allow_code_generation: true
+      allow_behavior_config: true
+
+# Module loading settings
+module_settings:
+  auto_reload: false  # Auto-reload modules on file change (dev mode)
+  fail_on_error: false  # Continue loading if a module fails
+  load_timeout: 10  # Seconds to wait for module initialization
