@@ -229,3 +229,33 @@ class BehaviorConfig(Base):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "updated_by": self.updated_by,
         }
+
+
+class APIKey(Base):
+    """API keys for inter-agent communication."""
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(64), unique=True, nullable=False)  # API key (hashed)
+    name = Column(String(200), nullable=False)  # Agent name/identifier
+    description = Column(Text, nullable=True)  # Purpose of this agent
+    permissions = Column(Text, default="*")  # Comma-separated permissions or "*" for all
+    is_active = Column(Boolean, default=True)  # Can be disabled without deleting
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used = Column(DateTime, nullable=True)  # Track usage
+    usage_count = Column(Integer, default=0)  # Number of API calls made
+
+    def __repr__(self):
+        return f"<APIKey(name='{self.name}', active={self.is_active})>"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "permissions": self.permissions.split(",") if self.permissions != "*" else ["*"],
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_used": self.last_used.isoformat() if self.last_used else None,
+            "usage_count": self.usage_count,
+        }
