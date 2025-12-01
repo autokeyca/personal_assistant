@@ -195,20 +195,22 @@ class TodoService:
                 return True
             return False
 
-    def search(self, query: str, limit: int = 20) -> List[dict]:
-        """Search todos by title or description."""
+    def search(self, query: str, limit: int = 20, user_id: int = None) -> List[dict]:
+        """Search todos by title or description, optionally filtered by user."""
         with get_session() as session:
-            todos = (
-                session.query(Todo)
-                .filter(
-                    or_(
-                        Todo.title.ilike(f"%{query}%"),
-                        Todo.description.ilike(f"%{query}%"),
-                    )
-                )
-                .limit(limit)
-                .all()
+            query_filter = or_(
+                Todo.title.ilike(f"%{query}%"),
+                Todo.description.ilike(f"%{query}%"),
             )
+
+            # Build the query
+            todos_query = session.query(Todo).filter(query_filter)
+
+            # Add user filter if provided
+            if user_id is not None:
+                todos_query = todos_query.filter(Todo.user_id == user_id)
+
+            todos = todos_query.limit(limit).all()
             return [t.to_dict() for t in todos]
 
     def get_due_soon(self, hours: int = 24) -> List[dict]:
