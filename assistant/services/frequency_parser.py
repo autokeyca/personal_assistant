@@ -197,23 +197,31 @@ class FrequencyParser:
 
         return " ".join(parts)
 
-    def should_remind_now(self, config: Dict, last_reminder_time=None) -> bool:
+    def should_remind_now(self, config: Dict, last_reminder_time=None, timezone_name: str = None) -> bool:
         """
         Check if a reminder should be sent now based on the configuration.
 
         Args:
             config: Frequency configuration dictionary
             last_reminder_time: datetime of last reminder sent (None if never sent)
+            timezone_name: Timezone name (defaults to system timezone from config)
 
         Returns:
             True if a reminder should be sent now
         """
         from datetime import datetime, timedelta
+        import pytz
 
         if not config or not config.get("enabled"):
             return False
 
-        now = datetime.now()
+        # Use timezone-aware datetime
+        if timezone_name is None:
+            from assistant.config import get as get_config
+            timezone_name = get_config("timezone", "America/Montreal")
+
+        tz = pytz.timezone(timezone_name)
+        now = datetime.now(tz)
 
         # Check day constraint
         days = config.get("days")
@@ -247,6 +255,10 @@ class FrequencyParser:
                 delta = timedelta(weeks=interval_value)
             else:
                 return False
+
+            # Make last_reminder_time timezone-aware if it's naive
+            if last_reminder_time.tzinfo is None:
+                last_reminder_time = tz.localize(last_reminder_time)
 
             time_since_last = now - last_reminder_time
 
