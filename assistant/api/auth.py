@@ -65,6 +65,11 @@ async def verify_api_key(api_key: str = Security(api_key_header)) -> APIKey:
         api_key_obj.usage_count += 1
         session.commit()
 
+        # Load all attributes before detaching to avoid lazy-load errors
+        _ = api_key_obj.permissions  # Force load
+        _ = api_key_obj.name
+        _ = api_key_obj.description
+
         # Detach from session
         session.expunge(api_key_obj)
 

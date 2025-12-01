@@ -3,12 +3,14 @@
 import logging
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 
 from assistant.config import get
 from assistant.db import get_session, Todo, Reminder, APIKey as APIKeyModel
 from assistant.services import TodoService, UserService, FrequencyParser
 from .auth import verify_api_key, check_permission
+from .security import IPWhitelistMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware
 from .schemas import (
     MessageRequest, MessageResponse,
     TaskCreateRequest, TaskResponse,
@@ -27,6 +29,33 @@ app = FastAPI(
     docs_url="/docs",  # Swagger UI
     redoc_url="/redoc",  # ReDoc
 )
+
+# Add security middleware
+# 1. IP Whitelist (if configured)
+allowed_ips = get("api.allowed_ips", [])
+if allowed_ips:
+    app.add_middleware(IPWhitelistMiddleware, allowed_ips=allowed_ips)
+    logger.info(f"IP whitelist enabled with {len(allowed_ips)} addresses")
+else:
+    logger.warning("No IP whitelist configured - all IPs allowed (localhost excepted)")
+
+# 2. Rate limiting
+rate_limit = get("api.rate_limit_per_minute", 60)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=rate_limit)
+
+# 3. Security headers
+app.add_middleware(SecurityHeadersMiddleware)
+
+# 4. CORS (if needed for web frontends)
+cors_origins = get("api.cors_origins", [])
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # Bot instance for sending messages (will be set by run_api.py)

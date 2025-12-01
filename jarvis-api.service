@@ -1,0 +1,19 @@
+[Unit]
+Description=Jarvis Agent API Server
+After=network.target
+
+[Service]
+Type=simple
+User=ja
+WorkingDirectory=/home/ja/projects/personal_assistant
+Environment="PATH=/home/ja/projects/personal_assistant/venv/bin"
+ExecStart=/home/ja/projects/personal_assistant/venv/bin/python /home/ja/projects/personal_assistant/run_api.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/home/ja/projects/personal_assistant/logs/api.log
+StandardError=append:/home/ja/projects/personal_assistant/logs/api_error.log
+
+[Install]
+WantedBy=multi-user.target
