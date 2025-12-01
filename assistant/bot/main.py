@@ -15,7 +15,7 @@ from assistant.scheduler import setup_scheduler
 from assistant.core.module_loader import ModuleLoader
 from assistant.core.module_system import registry
 
-from .handlers import todo, calendar, email, reminders, general, intelligent
+from .handlers import todo, calendar, email, reminders, general, intelligent, authorization
 
 logger = logging.getLogger(__name__)
 
@@ -130,10 +130,6 @@ def create_bot() -> Application:
     app.add_handler(CommandHandler("reminders", reminders.list_reminders, filters=user_filter))
     app.add_handler(CommandHandler("delremind", reminders.delete_reminder, filters=user_filter))
 
-    # Approval commands (owner only)
-    app.add_handler(CommandHandler("approve", intelligent.approve_request, filters=user_filter))
-    app.add_handler(CommandHandler("reject", intelligent.reject_request, filters=user_filter))
-
     # User authorization commands (owner only)
     app.add_handler(CommandHandler("authorize", intelligent.authorize_user, filters=user_filter))
     app.add_handler(CommandHandler("block", intelligent.block_user, filters=user_filter))
@@ -163,6 +159,10 @@ def create_bot() -> Application:
         filters.TEXT & ~filters.COMMAND,
         intelligent.handle_intelligent_message
     ))
+
+    # Authorization callback handlers
+    for handler in authorization.get_authorization_handlers():
+        app.add_handler(handler)
 
     # Error handler
     app.add_error_handler(error_handler)

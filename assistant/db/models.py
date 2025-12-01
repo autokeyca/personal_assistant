@@ -125,7 +125,10 @@ class User(Base):
     last_name = Column(String(200), nullable=True)
     username = Column(String(200), nullable=True)  # @username
     is_owner = Column(Boolean, default=False)  # True for the authorized owner
-    is_authorized = Column(Boolean, default=False)  # True if allowed to send tasks
+    is_authorized = Column(Boolean, default=False)  # True if allowed to interact with Jarvis
+    role = Column(String(20), nullable=True)  # 'owner', 'employee', 'contact'
+    authorized_at = Column(DateTime, nullable=True)  # When they were authorized
+    authorized_by = Column(BigInteger, nullable=True)  # Telegram ID of who authorized them
     first_seen = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -147,6 +150,9 @@ class User(Base):
             "username": self.username,
             "is_owner": self.is_owner,
             "is_authorized": self.is_authorized,
+            "role": self.role,
+            "authorized_at": self.authorized_at.isoformat() if self.authorized_at else None,
+            "authorized_by": self.authorized_by,
             "first_seen": self.first_seen.isoformat() if self.first_seen else None,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
         }
@@ -185,23 +191,6 @@ class ConversationHistory(Base):
             "channel": self.channel,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
         }
-
-
-class PendingApproval(Base):
-    """Pending task approvals from non-owner users."""
-    __tablename__ = "pending_approvals"
-
-    id = Column(Integer, primary_key=True)
-    requester_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
-    request_message = Column(Text, nullable=False)  # What the user asked for
-    intent = Column(String(50), nullable=True)  # Parsed intent from LLM
-    entities = Column(Text, nullable=True)  # JSON-encoded entities
-    status = Column(String(20), default="pending")  # pending, approved, rejected
-    created_at = Column(DateTime, default=datetime.utcnow)
-    resolved_at = Column(DateTime, nullable=True)
-
-    def __repr__(self):
-        return f"<PendingApproval(id={self.id}, requester_id={self.requester_id}, status='{self.status}')>"
 
 
 class BehaviorConfig(Base):

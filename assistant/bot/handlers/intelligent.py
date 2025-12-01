@@ -156,11 +156,19 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_intelligent_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle text messages using LLM for natural language understanding."""
     try:
+        from assistant.bot.handlers.authorization import handle_unauthorized_user
+
         # Get or create user
         user_service = UserService()
         user, is_new = user_service.get_or_create_user(update.effective_user)
 
-        # Greet new users
+        # Check if user is authorized
+        if not user['is_authorized'] and not user['is_owner']:
+            # Route to authorization handler
+            await handle_unauthorized_user(update, context)
+            return
+
+        # Greet new authorized users
         if is_new:
             await send_introduction(update, user)
             return
@@ -175,65 +183,6 @@ async def handle_intelligent_message(update: Update, context: ContextTypes.DEFAU
     except Exception as e:
         logger.error(f"Error handling intelligent message: {e}")
         await update.message.reply_text(f"❌ Error processing message: {str(e)}")
-
-
-async def request_owner_approval(update: Update, context: ContextTypes.DEFAULT_TYPE, user, message: str, intent: str, entities: dict, existing_message=None):
-    """Request owner approval for a task from non-authorized user."""
-    user_service = UserService()
-    owner_id = get("telegram.authorized_user_id")
-
-    # Create pending approval
-    approval_id = user_service.create_approval_request(
-        requester_id=user['telegram_id'],
-        request_message=message,
-        intent=intent,
-        entities=json.dumps(entities) if entities else None
-    )
-
-    # Notify requester
-    response = f"I've forwarded your request to my owner for approval.\n\nRequest ID: {approval_id}"
-    if existing_message:
-        await existing_message.edit_text(response)
-    else:
-        await update.message.reply_text(response)
-
-    user_service.add_conversation(user['telegram_id'], "assistant", response)
-
-    # Notify owner
-    owner_message = f"""🔔 Task Approval Request #{approval_id}
-
-From: {user['full_name']} (@{user['username'] if user['username'] else 'no username'})
-Request: {message}
-
-Intent: {intent}
-Entities: {json.dumps(entities, indent=2) if entities else 'None'}
-
-Reply with:
-• /approve {approval_id} - to approve and execute
-• /reject {approval_id} - to reject"""
-
-    try:
-        await context.bot.send_message(chat_id=owner_id, text=owner_message)
-    except Exception as e:
-        logger.error(f"Failed to send approval request to owner: {e}")
-
-
-async def forward_message_to_owner(update: Update, user, message: str):
-    """Forward a message from non-owner user to the owner."""
-    owner_id = get("telegram.authorized_user_id")
-
-    forward_text = f"""📨 Message from {user['full_name']}:
-
-{message}
-
----
-User ID: {user['telegram_id']}
-Username: @{user['username'] if user['username'] else 'N/A'}"""
-
-    try:
-        await update.get_bot().send_message(chat_id=owner_id, text=forward_text)
-    except Exception as e:
-        logger.error(f"Failed to forward message to owner: {e}")
 
 
 async def process_natural_language(
@@ -272,26 +221,11 @@ async def process_natural_language(
             user_service.add_conversation(user['telegram_id'], "assistant", response)
             return
 
-        # Check if this is a task intent that requires authorization
-        # Note: telegram_message is NOT in this list - messages are relayed directly
-        task_intents = ['todo_add', 'todo_complete', 'todo_delete', 'reminder_add']
+        # Note: Unauthorized users are handled at entry point (handle_intelligent_message)
+        # Only authorized users (owner, employees, contacts) reach this point
 
-        if intent in task_intents and not user['is_owner'] and not user['is_authorized']:
-            # Non-authorized user trying to execute a task - request approval
-            await request_owner_approval(update, context, user, message, intent, entities, existing_message)
-            return
-
-        # If not owner but asking a question or having general chat, pass message to owner
-        # Note: telegram_message is handled by its own handler, not forwarded
-        if not user['is_owner'] and intent not in task_intents and intent not in owner_only_intents and intent not in ['general_chat', 'telegram_message']:
-            await forward_message_to_owner(update, user, message)
-            response = f"I've forwarded your request to my owner. They will respond shortly."
-            if existing_message:
-                await existing_message.edit_text(response)
-            else:
-                await update.message.reply_text(response)
-            user_service.add_conversation(user['telegram_id'], "assistant", response)
-            return
+        # If non-owner user is asking questions or general chat, they get direct responses
+        # No need to forward messages - authorized users can interact directly with Jarvis
 
         # Route to appropriate handler based on intent
         if intent == 'todo_add':
@@ -1533,102 +1467,6 @@ Would you like me to save this code? Reply 'yes' to confirm."""
 
     if user:
         user_service.add_conversation(user['telegram_id'], "assistant", response)
-
-
-async def approve_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Approve a pending task request from another user (owner only)."""
-    user_service = UserService()
-
-    # Get approval ID from command
-    if not context.args:
-        await update.message.reply_text("Usage: /approve <request_id>")
-        return
-
-    try:
-        approval_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("❌ Invalid request ID. Must be a number.")
-        return
-
-    # Approve the request
-    request_details = user_service.approve_request(approval_id)
-
-    if not request_details:
-        await update.message.reply_text(f"❌ Request #{approval_id} not found.")
-        return
-
-    # Notify owner
-    await update.message.reply_text(f"✅ Request #{approval_id} approved.")
-
-    # Get requester info
-    requester = user_service.get_user_by_id(request_details['requester_id'])
-    if not requester:
-        await update.message.reply_text("❌ Could not find requester information.")
-        return
-
-    # Execute the task
-    try:
-        # Parse entities back from JSON
-        entities = json.loads(request_details['entities']) if request_details['entities'] else {}
-        intent = request_details['intent']
-        message_text = request_details['request_message']
-
-        # Create a mock update object for the requester
-        # Note: This is a simplified approach. In production, you'd want to handle this more robustly.
-        response_text = f"✅ Your request has been approved by {update.effective_user.first_name}.\n\nExecuting: {message_text}"
-
-        # Notify requester
-        await context.bot.send_message(
-            chat_id=request_details['requester_id'],
-            text=response_text
-        )
-
-        # For now, just notify - actual execution would require more complex handling
-        # TODO: Implement actual task execution from approved requests
-
-    except Exception as e:
-        logger.error(f"Error executing approved request: {e}")
-        await update.message.reply_text(f"❌ Error executing request: {str(e)}")
-
-
-async def reject_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Reject a pending task request from another user (owner only)."""
-    user_service = UserService()
-
-    # Get approval ID from command
-    if not context.args:
-        await update.message.reply_text("Usage: /reject <request_id>")
-        return
-
-    try:
-        approval_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("❌ Invalid request ID. Must be a number.")
-        return
-
-    # Reject the request
-    success = user_service.reject_request(approval_id)
-
-    if not success:
-        await update.message.reply_text(f"❌ Request #{approval_id} not found.")
-        return
-
-    # Notify owner
-    await update.message.reply_text(f"❌ Request #{approval_id} rejected.")
-
-    # Get request details to notify requester
-    try:
-        from assistant.db import get_session, PendingApproval
-
-        with get_session() as session:
-            request = session.query(PendingApproval).filter_by(id=approval_id).first()
-            if request:
-                await context.bot.send_message(
-                    chat_id=request.requester_id,
-                    text=f"Your request has been declined.\n\nOriginal request: {request.request_message}"
-                )
-    except Exception as e:
-        logger.error(f"Error notifying requester of rejection: {e}")
 
 
 async def authorize_user(update: Update, context: ContextTypes.DEFAULT_TYPE):

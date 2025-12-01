@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from telegram import User as TelegramUser
 
-from assistant.db import get_session, User, ConversationHistory, PendingApproval
+from assistant.db import get_session, User, ConversationHistory
 from assistant.config import get
 
 logger = logging.getLogger(__name__)
@@ -176,84 +176,6 @@ class UserService:
 
             # Reverse to get chronological order
             return [conv.to_dict() for conv in reversed(conversations)]
-
-    def create_approval_request(
-        self,
-        requester_id: int,
-        request_message: str,
-        intent: Optional[str] = None,
-        entities: Optional[str] = None
-    ) -> int:
-        """
-        Create a pending approval request.
-
-        Args:
-            requester_id: Telegram ID of user making request
-            request_message: Original message from user
-            intent: Parsed intent from LLM
-            entities: JSON-encoded entities
-
-        Returns:
-            ID of created approval request
-        """
-        with get_session() as session:
-            approval = PendingApproval(
-                requester_id=requester_id,
-                request_message=request_message,
-                intent=intent,
-                entities=entities
-            )
-            session.add(approval)
-            session.commit()
-            session.refresh(approval)
-            return approval.id
-
-    def approve_request(self, approval_id: int) -> Optional[Dict[str, Any]]:
-        """
-        Approve a pending request.
-
-        Args:
-            approval_id: ID of approval request
-
-        Returns:
-            Request details if found, None otherwise
-        """
-        with get_session() as session:
-            approval = session.query(PendingApproval).filter_by(id=approval_id).first()
-            if not approval:
-                return None
-
-            approval.status = "approved"
-            approval.resolved_at = datetime.utcnow()
-            session.commit()
-
-            return {
-                "id": approval.id,
-                "requester_id": approval.requester_id,
-                "request_message": approval.request_message,
-                "intent": approval.intent,
-                "entities": approval.entities
-            }
-
-    def reject_request(self, approval_id: int) -> bool:
-        """
-        Reject a pending request.
-
-        Args:
-            approval_id: ID of approval request
-
-        Returns:
-            True if successful
-        """
-        with get_session() as session:
-            approval = session.query(PendingApproval).filter_by(id=approval_id).first()
-            if not approval:
-                return False
-
-            approval.status = "rejected"
-            approval.resolved_at = datetime.utcnow()
-            session.commit()
-            return True
 
     def get_user(self, telegram_id: int):
         """
