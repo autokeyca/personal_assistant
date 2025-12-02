@@ -960,7 +960,25 @@ async def handle_reminder_add(update, context, entities, original_message, exist
 
     user_service = UserService()
     time_str = entities.get('time') or entities.get('date')
-    message_text = entities.get('title') or entities.get('description') or original_message
+    message_text = entities.get('title') or entities.get('description')
+
+    # If no explicit message extracted, check if original_message contains more than just time expression
+    if not message_text:
+        # Check if original message is just a time expression (e.g., "remind me in 15 minutes")
+        import re
+        time_pattern = r'(remind|reminder|in|at|tomorrow|today|next|on|every)\s+(me\s+)?(in\s+)?\d+'
+        if re.search(time_pattern, original_message.lower()) and len(original_message.split()) <= 5:
+            # Message is too short and looks like just a time expression
+            response = "❌ What should I remind you about?\n\nTry: 'remind me in 15 minutes to call mom' or 'remind me tomorrow at 3pm about the meeting'"
+            if existing_message:
+                await existing_message.edit_text(response)
+            else:
+                await update.message.reply_text(response)
+            if user:
+                user_service.add_conversation(user['telegram_id'], "assistant", response)
+            return
+        else:
+            message_text = original_message
 
     if not time_str:
         response = "❌ Could not extract time from message. Try: 'remind me tomorrow at 3pm to call mom'"

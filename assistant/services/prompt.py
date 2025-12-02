@@ -86,6 +86,11 @@ Important:
   - If last message was via telegram channel → use "telegram_message"
   - If last message was via email channel → use "email_send"
   - Use the sender's name from context as the recipient
+- CRITICAL: For "reminder_add" intent, extract BOTH time and the reminder message:
+  - "remind me in 15 minutes to call mom" → time: "in 15 minutes", title: "call mom"
+  - "remind me tomorrow at 3pm about the meeting" → time: "tomorrow at 3pm", title: "about the meeting"
+  - "remind me at 5pm" (no message) → still extract intent, but leave title/description null
+  - The reminder message should be extracted to "title" or "description" fields
 - CRITICAL: Meta-programming intents (system modification):
   - Use "meta_modify_prompt" when user wants to change how the assistant behaves/talks
     Examples: "be more formal", "change your personality", "stop suggesting priorities"
