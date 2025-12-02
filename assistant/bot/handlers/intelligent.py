@@ -1060,6 +1060,18 @@ async def handle_reminder_add(update, context, entities, original_message, exist
             # If somehow still naive, assume it's already in the configured timezone
             reminder_time_utc = tz.localize(reminder_time).astimezone(pytz.UTC).replace(tzinfo=None)
 
+        # Validate that reminder time is in the future
+        now_utc = datetime.now(pytz.UTC).replace(tzinfo=None)
+        if reminder_time_utc <= now_utc:
+            response = f"❌ Cannot set reminder for past time: {time_str}\n\nPlease specify a time in the future."
+            if existing_message:
+                await existing_message.edit_text(response)
+            else:
+                await update.message.reply_text(response)
+            if user:
+                user_service.add_conversation(user['telegram_id'], "assistant", response)
+            return
+
         with get_session() as session:
             reminder = Reminder(
                 message=message_text,

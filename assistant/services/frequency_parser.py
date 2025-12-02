@@ -257,8 +257,9 @@ class FrequencyParser:
                 return False
 
             # Make last_reminder_time timezone-aware if it's naive
+            # Database stores timestamps as naive UTC, so treat naive datetimes as UTC
             if last_reminder_time.tzinfo is None:
-                last_reminder_time = tz.localize(last_reminder_time)
+                last_reminder_time = pytz.UTC.localize(last_reminder_time).astimezone(tz)
 
             time_since_last = now - last_reminder_time
 
