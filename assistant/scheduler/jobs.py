@@ -34,13 +34,15 @@ async def check_reminders(bot: Bot):
 
         for reminder in due_reminders:
             try:
+                # Send to the user who created the reminder, or owner if not specified
+                target_user_id = reminder.user_id if reminder.user_id else user_id
                 await bot.send_message(
-                    chat_id=user_id,
+                    chat_id=target_user_id,
                     text=f" *Reminder*\n\n{reminder.message}",
                     parse_mode="Markdown",
                 )
                 reminder.is_sent = True
-                logger.info(f"Sent reminder {reminder.id}")
+                logger.info(f"Sent reminder {reminder.id} to user {target_user_id}")
 
             except TelegramError as e:
                 logger.error(f"Failed to send reminder {reminder.id}: {e}")

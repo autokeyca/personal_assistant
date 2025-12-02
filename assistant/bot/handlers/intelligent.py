@@ -1031,7 +1031,8 @@ async def handle_reminder_add(update, context, entities, original_message, exist
             reminder = Reminder(
                 message=message_text,
                 remind_at=reminder_time_utc,  # Store as naive UTC
-                is_sent=False
+                is_sent=False,
+                user_id=user['telegram_id'] if user else None  # Store who created this reminder
             )
             session.add(reminder)
             session.commit()

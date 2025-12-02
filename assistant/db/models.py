@@ -84,6 +84,7 @@ class Reminder(Base):
     is_sent = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     todo_id = Column(Integer, nullable=True)  # Optional link to a todo
+    user_id = Column(BigInteger, nullable=True)  # User who created this reminder (telegram_id)
 
     def __repr__(self):
         return f"<Reminder(id={self.id}, remind_at={self.remind_at}, sent={self.is_sent})>"
