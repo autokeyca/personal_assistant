@@ -290,15 +290,72 @@ def setup_scheduler(app):
         name="check_upcoming_events",
     )
 
-    # Morning briefing
-    briefing_time = get("scheduler.morning_briefing_time", "08:00")
+    # Morning briefing - with timezone awareness
+    from assistant.services import BehaviorConfigService
+    behavior_service = BehaviorConfigService()
+
+    # Check for dynamic briefing time in database, fallback to config
+    briefing_time_config = behavior_service.get("morning_briefing_time")
+    if briefing_time_config:
+        briefing_time = briefing_time_config['value']
+    else:
+        briefing_time = get("scheduler.morning_briefing_time", "08:00")
+
     hour, minute = map(int, briefing_time.split(":"))
 
     from datetime import time
+    tz_name = get("timezone", "America/Montreal")
+    tz = pytz.timezone(tz_name)
+
     job_queue.run_daily(
         lambda context: send_morning_briefing(context.bot),
-        time=time(hour=hour, minute=minute),
+        time=time(hour=hour, minute=minute, tzinfo=tz),
         name="morning_briefing",
     )
 
+    logger.info(f"Morning briefing scheduled for {briefing_time} {tz_name}")
     logger.info("Scheduler setup complete")
+
+
+def reschedule_morning_briefing(application, new_time: str):
+    """
+    Reschedule the morning briefing to a new time.
+
+    Args:
+        application: The Telegram application instance
+        new_time: New time in HH:MM format (e.g., "07:30")
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        from datetime import time
+
+        # Parse the new time
+        hour, minute = map(int, new_time.split(":"))
+
+        # Get timezone
+        tz_name = get("timezone", "America/Montreal")
+        tz = pytz.timezone(tz_name)
+
+        # Remove existing morning briefing job
+        job_queue = application.job_queue
+        current_jobs = job_queue.get_jobs_by_name("morning_briefing")
+        for job in current_jobs:
+            job.schedule_removal()
+
+        logger.info(f"Removed {len(current_jobs)} existing morning briefing job(s)")
+
+        # Schedule new job
+        job_queue.run_daily(
+            lambda context: send_morning_briefing(context.bot),
+            time=time(hour=hour, minute=minute, tzinfo=tz),
+            name="morning_briefing",
+        )
+
+        logger.info(f"Morning briefing rescheduled to {new_time} {tz_name}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to reschedule morning briefing: {e}")
+        return False

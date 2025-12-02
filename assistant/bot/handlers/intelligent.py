@@ -1340,7 +1340,33 @@ async def handle_meta_configure(update, context, entities, original_message, exi
     )
 
     if success:
-        response = f"""✅ Configuration updated!
+        # Special handling for morning briefing time - reschedule immediately
+        if 'morning_briefing_time' in config_key.lower() or 'briefing' in config_key.lower():
+            try:
+                from assistant.scheduler.jobs import reschedule_morning_briefing
+                # Get the application from context
+                reschedule_success = reschedule_morning_briefing(context.application, config_value)
+                if reschedule_success:
+                    response = f"""✅ Morning briefing time updated!
+
+**Morning Briefing** will now run at `{config_value}` (Montreal time)
+
+The schedule has been updated immediately - you'll receive your next briefing at the new time."""
+                else:
+                    response = f"""⚠️ Configuration saved but rescheduling failed.
+
+**{config_key}** = `{config_value}`
+
+Please restart the bot for changes to take effect."""
+            except Exception as e:
+                logger.error(f"Error rescheduling morning briefing: {e}")
+                response = f"""⚠️ Configuration saved but rescheduling failed: {str(e)}
+
+**{config_key}** = `{config_value}`
+
+Please restart the bot for changes to take effect."""
+        else:
+            response = f"""✅ Configuration updated!
 
 **{config_key}** = `{config_value}`
 
