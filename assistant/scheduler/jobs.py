@@ -62,11 +62,12 @@ async def check_todo_reminders(bot: Bot):
         now = datetime.now(tz)
 
         # Get all todos with reminder configs that are not completed
+        from assistant.db.models import TodoStatus
         todos_with_reminders = (
             session.query(Todo)
             .filter(
                 Todo.reminder_config.isnot(None),
-                Todo.status != 'completed',
+                Todo.status != TodoStatus.COMPLETED,  # Compare enum to enum, not string
             )
             .all()
         )
