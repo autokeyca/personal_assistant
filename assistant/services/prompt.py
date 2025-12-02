@@ -17,7 +17,7 @@ DEFAULT_PARSER_PROMPT = """Parse this message and extract the intent and entitie
 {context}
 Return ONLY a JSON object with this structure:
 {{
-    "intent": "one of: todo_add, todo_list, todo_complete, todo_delete, todo_focus, todo_set_reminder, calendar_add, calendar_list, reminder_add, telegram_message, email_send, email_check, help, general_chat, meta_modify_prompt, meta_configure, meta_extend",
+    "intent": "one of: todo_add, todo_list, todo_complete, todo_delete, todo_focus, todo_set_reminder, calendar_add, calendar_list, reminder_add, telegram_message, email_send, email_check, web_search, web_fetch, web_ask, help, general_chat, meta_modify_prompt, meta_configure, meta_extend",
     "entities": {{
         "title": "extracted title/subject",
         "description": "extracted description or message content",
@@ -37,7 +37,11 @@ Return ONLY a JSON object with this structure:
         "config_key": "for meta_configure: setting name to change",
         "config_value": "for meta_configure: new value for the setting",
         "feature_name": "for meta_extend: name of feature to add",
-        "feature_description": "for meta_extend: detailed requirements"
+        "feature_description": "for meta_extend: detailed requirements",
+        "query": "for web_search/web_ask: search query or question",
+        "url": "for web_fetch: URL to fetch content from",
+        "max_results": "for web_search: number of results (default 5)",
+        "summarize": "for web_search/web_fetch: whether to generate summary (true/false)"
     }},
     "confidence": 0.95
 }}
@@ -92,6 +96,16 @@ Important:
   - Use "meta_extend" when user wants to add new features/commands/capabilities
     Examples: "add expense tracking", "create a habit tracker", "add pomodoro timer"
     Extract: feature_name (what to build), description (detailed requirements)
+- CRITICAL: Web research intents:
+  - Use "web_search" when user wants to search the web or find information online
+    Examples: "search for best restaurants in Montreal", "find information about Python async", "look up AI news"
+    Extract: query (the search query), max_results (if specified), summarize (true if they want a summary)
+  - Use "web_fetch" when user wants to read/extract content from a specific URL
+    Examples: "fetch https://example.com", "read this article: [URL]", "get content from [URL]"
+    Extract: url (the URL to fetch), summarize (true if they want a summary)
+  - Use "web_ask" when user asks a question that requires current/real-time information
+    Examples: "what's the weather in Montreal", "who won the game yesterday", "what are the latest AI developments"
+    Extract: query (the question to answer)
 - If the message is conversational/chat, use "general_chat" intent"""
 
 

@@ -270,6 +270,15 @@ async def process_natural_language(
         elif intent == 'meta_extend':
             await handle_meta_extend(update, context, entities, message, existing_message, user)
 
+        elif intent == 'web_search':
+            await handle_web_search(update, context, entities, message, existing_message, user)
+
+        elif intent == 'web_fetch':
+            await handle_web_fetch(update, context, entities, message, existing_message, user)
+
+        elif intent == 'web_ask':
+            await handle_web_ask(update, context, entities, message, existing_message, user)
+
         elif intent == 'general_chat':
             await handle_general_chat(update, context, message, existing_message, user, conversation_history)
 
@@ -1746,3 +1755,185 @@ Types:
         response = f"❌ Failed to reset {prompt_name} prompt(s)."
 
     await update.message.reply_text(response, parse_mode="Markdown")
+
+
+async def handle_web_search(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle web search requests."""
+    from assistant.services import ResearchService, UserService
+    
+    user_service = UserService()
+    query = entities.get('query')
+    max_results = entities.get('max_results', 5)
+    summarize = entities.get('summarize', True)  # Default to True for better UX
+
+    if not query:
+        response = "❌ Please provide a search query.\n\nExample: 'Search for best Python frameworks 2025'"
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    # Show searching message
+    search_msg = f"🔍 Searching the web for: *{query}*..."
+    if existing_message:
+        await existing_message.edit_text(search_msg, parse_mode="Markdown")
+    else:
+        existing_message = await update.message.reply_text(search_msg, parse_mode="Markdown")
+
+    try:
+        # Get research service with LLM
+        llm = get_llm_service()
+        research = ResearchService(llm_service=llm)
+
+        # Perform search
+        result = research.search(query=query, max_results=max_results, summarize=summarize)
+
+        if result.get('error'):
+            response = f"❌ Search error: {result['error']}"
+        elif not result.get('results'):
+            response = f"🔍 No results found for: *{query}*"
+        else:
+            # Format response
+            response = f"🔍 **Search Results for:** {query}\n\n"
+
+            # Add summary if available
+            if result.get('summary'):
+                response += f"**Summary:**\n{result['summary']}\n\n"
+                response += "---\n\n"
+
+            # Add top results
+            response += f"**Top {len(result['results'])} Results:**\n\n"
+            for i, res in enumerate(result['results'][:5], 1):
+                response += f"{i}. **{res['title']}**\n"
+                if res.get('snippet'):
+                    response += f"   _{res['snippet'][:150]}..._\n"
+                response += f"   🔗 {res['url']}\n\n"
+
+        await existing_message.edit_text(response, parse_mode="Markdown")
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+    except Exception as e:
+        logger.error(f"Web search error: {e}")
+        response = f"❌ Error performing search: {str(e)}"
+        await existing_message.edit_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+
+async def handle_web_fetch(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle URL fetching requests."""
+    from assistant.services import ResearchService, UserService
+    
+    user_service = UserService()
+    url = entities.get('url')
+    summarize = entities.get('summarize', True)
+
+    if not url:
+        response = "❌ Please provide a URL to fetch.\n\nExample: 'Fetch https://example.com/article'"
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    # Show fetching message
+    fetch_msg = f"📄 Fetching content from URL..."
+    if existing_message:
+        await existing_message.edit_text(fetch_msg)
+    else:
+        existing_message = await update.message.reply_text(fetch_msg)
+
+    try:
+        # Get research service with LLM
+        llm = get_llm_service()
+        research = ResearchService(llm_service=llm)
+
+        # Fetch URL
+        result = research.fetch(url=url, extract="text", summarize=summarize)
+
+        if result.get('error'):
+            response = f"❌ Fetch error: {result['error']}"
+        else:
+            response = f"📄 **{result.get('title', 'Fetched Content')}**\n\n"
+            response += f"🔗 {url}\n\n"
+
+            if result.get('summary'):
+                response += f"**Summary:**\n{result['summary']}\n\n"
+            elif result.get('content'):
+                # Show first 500 chars if no summary
+                content_preview = result['content'][:500]
+                response += f"**Content:**\n{content_preview}...\n\n"
+                response += f"_({result.get('content_length', 0)} characters total)_"
+
+        await existing_message.edit_text(response, parse_mode="Markdown")
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+    except Exception as e:
+        logger.error(f"Web fetch error: {e}")
+        response = f"❌ Error fetching URL: {str(e)}"
+        await existing_message.edit_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+
+async def handle_web_ask(update, context, entities, original_message, existing_message=None, user=None):
+    """Handle research-based questions."""
+    from assistant.services import ResearchService, UserService
+    
+    user_service = UserService()
+    question = entities.get('query')
+
+    if not question:
+        response = "❌ Please provide a question.\n\nExample: 'What's the weather in Montreal today?'"
+        if existing_message:
+            await existing_message.edit_text(response)
+        else:
+            await update.message.reply_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+        return
+
+    # Show researching message
+    research_msg = f"🔬 Researching: *{question}*..."
+    if existing_message:
+        await existing_message.edit_text(research_msg, parse_mode="Markdown")
+    else:
+        existing_message = await update.message.reply_text(research_msg, parse_mode="Markdown")
+
+    try:
+        # Get research service with LLM
+        llm = get_llm_service()
+        research = ResearchService(llm_service=llm)
+
+        # Research and answer
+        result = research.ask(question=question, sources=["web"], return_citations=True)
+
+        if result.get('error'):
+            response = f"❌ Research error: {result['error']}"
+        else:
+            response = f"**Question:** {question}\n\n"
+            response += f"**Answer:**\n{result.get('answer', 'No answer found.')}\n\n"
+
+            # Add citations if available
+            if result.get('citations'):
+                response += "**Sources:**\n"
+                for i, citation in enumerate(result['citations'][:3], 1):
+                    response += f"{i}. [{citation['title']}]({citation['url']})\n"
+
+        await existing_message.edit_text(response, parse_mode="Markdown", disable_web_page_preview=True)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
+
+    except Exception as e:
+        logger.error(f"Web ask error: {e}")
+        response = f"❌ Error researching question: {str(e)}"
+        await existing_message.edit_text(response)
+        if user:
+            user_service.add_conversation(user['telegram_id'], "assistant", response)
