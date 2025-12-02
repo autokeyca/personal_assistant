@@ -990,10 +990,35 @@ async def handle_reminder_add(update, context, entities, original_message, exist
             user_service.add_conversation(user['telegram_id'], "assistant", response)
         return
 
-    # Parse the time (simplified - you might want to enhance this)
+    # Parse the time using dateparser for better relative time support
     try:
-        from dateutil import parser
-        reminder_time = parser.parse(time_str)
+        import dateparser
+        from datetime import datetime
+        import pytz
+        from assistant.config import get
+
+        # Get timezone for proper parsing
+        tz_name = get("timezone", "America/Montreal")
+        tz = pytz.timezone(tz_name)
+
+        # Parse with dateparser which handles relative times like "in 15 minutes"
+        reminder_time = dateparser.parse(
+            time_str,
+            settings={
+                'TIMEZONE': tz_name,
+                'RETURN_AS_TIMEZONE_AWARE': True,
+                'PREFER_DATES_FROM': 'future',  # Prefer future dates for ambiguous inputs
+                'RELATIVE_BASE': datetime.now(tz)  # Base for relative times like "in 15 minutes"
+            }
+        )
+
+        if not reminder_time:
+            # Fallback to dateutil for absolute times
+            from dateutil import parser as dateutil_parser
+            reminder_time = dateutil_parser.parse(time_str)
+            # Make timezone aware if naive
+            if reminder_time.tzinfo is None:
+                reminder_time = tz.localize(reminder_time)
 
         with get_session() as session:
             reminder = Reminder(
