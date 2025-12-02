@@ -1020,16 +1020,25 @@ async def handle_reminder_add(update, context, entities, original_message, exist
             if reminder_time.tzinfo is None:
                 reminder_time = tz.localize(reminder_time)
 
+        # Convert to UTC for consistent storage (database stores naive UTC)
+        if reminder_time.tzinfo is not None:
+            reminder_time_utc = reminder_time.astimezone(pytz.UTC).replace(tzinfo=None)
+        else:
+            # If somehow still naive, assume it's already in the configured timezone
+            reminder_time_utc = tz.localize(reminder_time).astimezone(pytz.UTC).replace(tzinfo=None)
+
         with get_session() as session:
             reminder = Reminder(
                 message=message_text,
-                remind_at=reminder_time,
+                remind_at=reminder_time_utc,  # Store as naive UTC
                 is_sent=False
             )
             session.add(reminder)
             session.commit()
 
-            response = f"⏰ Reminder set for {reminder_time.strftime('%Y-%m-%d %H:%M')}\n💬 {message_text}"
+            # Show user-friendly time in their timezone
+            display_time = reminder_time.strftime('%Y-%m-%d %I:%M %p') if reminder_time.tzinfo else tz.localize(reminder_time).strftime('%Y-%m-%d %I:%M %p')
+            response = f"⏰ Reminder set for {display_time}\n💬 {message_text}"
     except Exception as e:
         response = f"❌ Could not parse time: {time_str}"
 

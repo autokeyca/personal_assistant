@@ -20,12 +20,13 @@ async def check_reminders(bot: Bot):
     tz = pytz.timezone(tz_name)
 
     with get_session() as session:
-        now = datetime.now(tz)
+        # Database stores naive UTC, so compare with naive UTC
+        now_utc = datetime.now(pytz.UTC).replace(tzinfo=None)
 
         due_reminders = (
             session.query(Reminder)
             .filter(
-                Reminder.remind_at <= now,
+                Reminder.remind_at <= now_utc,
                 Reminder.is_sent == False,
             )
             .all()
