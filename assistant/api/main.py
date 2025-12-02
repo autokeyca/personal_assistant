@@ -18,6 +18,7 @@ from .schemas import (
     TaskReminderRequest,
     StatusResponse,
 )
+from . import research
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,9 @@ if cors_origins:
         allow_headers=["*"],
     )
 
+# Include research router
+app.include_router(research.router)
+logger.info("Research endpoints registered")
 
 # Bot instance for sending messages (will be set by run_api.py)
 _bot_instance = None
