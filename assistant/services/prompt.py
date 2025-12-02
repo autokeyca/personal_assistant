@@ -71,6 +71,10 @@ Important:
   - "what is Mike working on" → intent: todo_list, user_name: "Mike"
   - "show all tasks" → intent: todo_list, user_name: "all"
   - "mark Sarah's task 5 complete" → intent: todo_complete, user_name: "Sarah", title: "5"
+- CRITICAL: Compound todo + reminder commands:
+  - "Create todo for Ron to call back. Set reminder every hour" → intent: todo_add, for_user: "Ron", title: "call back", frequency: "every hour"
+  - "Add task: review code. Remind me every 2 hours during business hours" → intent: todo_add, title: "review code", frequency: "every 2 hours during business hours"
+  - When a todo_add message includes reminder instructions (set reminder, remind me, etc.), extract BOTH the todo details AND the frequency
 - CRITICAL: Use "todo_focus" when user wants to focus on a task (e.g., "focus on 9", "focus 9", "focus on buy milk task")
   - For "focus 9" or "focus on 9", extract "9" as the title
   - For "focus on buy milk", extract "buy milk" as the title

@@ -350,6 +350,25 @@ async def handle_todo_add(update, context, entities, original_message, existing_
         follow_up_intensity=intensity
     )
 
+    # Check if a reminder frequency was specified in the same command
+    frequency = entities.get('frequency')
+    if frequency:
+        # Set up the reminder for this task
+        from assistant.services import FrequencyParser
+        from assistant.db import get_session, Todo
+        import json
+
+        frequency_parser = FrequencyParser()
+        frequency_config = frequency_parser.parse(frequency)
+
+        if frequency_config:
+            with get_session() as session:
+                db_todo = session.query(Todo).filter(Todo.id == todo['id']).first()
+                if db_todo:
+                    db_todo.reminder_config = json.dumps(frequency_config)
+                    session.commit()
+                    logger.info(f"Set reminder '{frequency}' for todo #{todo['id']}")
+
     # Check if user wants to focus on this new task
     should_focus = 'focus' in original_message.lower() and target_user_id == user['telegram_id']
 
@@ -407,6 +426,12 @@ async def handle_todo_add(update, context, entities, original_message, existing_
         # Task added for someone else
         response = f"✅ Added to {target_user_name}'s list: {todo['title']}"
 
+        # Add reminder info if one was set
+        if frequency and frequency_config:
+            from assistant.services import FrequencyParser
+            frequency_desc = FrequencyParser().describe(frequency_config)
+            response += f"\n⏰ Reminder: {frequency_desc}"
+
         # Notify the target user
         try:
             notify_msg = f"📋 New task from {user['first_name']}:\n\n{todo['title']}"
@@ -416,6 +441,10 @@ async def handle_todo_add(update, context, entities, original_message, existing_
                 notify_msg += f"\n📅 Due: {due_date.strftime('%Y-%m-%d')}"
             if description:
                 notify_msg += f"\n\n{description}"
+            if frequency and frequency_config:
+                from assistant.services import FrequencyParser
+                frequency_desc = FrequencyParser().describe(frequency_config)
+                notify_msg += f"\n⏰ Reminder: {frequency_desc}"
 
             await context.bot.send_message(
                 chat_id=target_user_id,
@@ -440,6 +469,10 @@ async def handle_todo_add(update, context, entities, original_message, existing_
             response += f" ({priority} priority)"
         if due_date:
             response += f"\n📅 Due: {due_date.strftime('%Y-%m-%d')}"
+        if frequency and frequency_config:
+            from assistant.services import FrequencyParser
+            frequency_desc = FrequencyParser().describe(frequency_config)
+            response += f"\n⏰ Reminder: {frequency_desc}"
         response += f"\n\n{format_todo_list(todos)}"
 
     if existing_message:
