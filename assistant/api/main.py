@@ -282,15 +282,33 @@ async def create_reminder(
 
     try:
         from dateutil import parser
+        from datetime import datetime
+        import pytz
 
         # Parse reminder time
         remind_at = parser.parse(request.remind_at)
+
+        # Make timezone-aware if naive
+        if remind_at.tzinfo is None:
+            # Assume UTC if no timezone specified
+            remind_at = pytz.UTC.localize(remind_at)
+
+        # Validate that reminder time is in the future
+        now_utc = datetime.now(pytz.UTC)
+        if remind_at <= now_utc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot set reminder for past time. Reminder time must be in the future."
+            )
+
+        # Convert to naive UTC for storage
+        remind_at_utc = remind_at.astimezone(pytz.UTC).replace(tzinfo=None)
 
         # Create reminder in database
         with get_session() as session:
             reminder = Reminder(
                 message=request.message,
-                remind_at=remind_at,
+                remind_at=remind_at_utc,
                 is_sent=False
             )
             session.add(reminder)
@@ -306,6 +324,9 @@ async def create_reminder(
                 is_sent=reminder.is_sent
             )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 400 for past time)
+        raise
     except Exception as e:
         logger.error(f"Error creating reminder: {e}")
         raise HTTPException(
