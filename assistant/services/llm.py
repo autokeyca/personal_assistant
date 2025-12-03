@@ -85,8 +85,22 @@ class LLMService:
             prompt_service = PromptService()
             parser_template = prompt_service.get_parser_prompt()
 
+            # Add today's date to context for better date parsing (Bug #15 fix)
+            from datetime import datetime
+            import pytz
+            from assistant.config import get
+
+            tz_name = get("timezone", "America/Montreal")
+            tz = pytz.timezone(tz_name)
+            now = datetime.now(tz)
+            today_str = now.strftime("%Y-%m-%d")
+            current_time = now.strftime("%H:%M")
+
+            # Enhance context with current date/time
+            context_with_date = f"Today's date: {today_str}\nCurrent time: {current_time}\n{context_str}"
+
             # Format the prompt with context and message
-            prompt = parser_template.format(context=context_str, message=message)
+            prompt = parser_template.format(context=context_with_date, message=message)
 
             response = self.model.generate_content(prompt)
             result = self._parse_json_response(response.text)

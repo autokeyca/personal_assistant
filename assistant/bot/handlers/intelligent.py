@@ -1092,10 +1092,26 @@ async def handle_reminder_add(update, context, entities, original_message, exist
     except Exception as e:
         response = f"❌ Could not parse time: {time_str}"
 
-    if existing_message:
-        await existing_message.edit_text(response)
-    else:
-        await update.message.reply_text(response)
+    # Bug #14 fix: Add timeout handling for message sending
+    try:
+        import asyncio
+        if existing_message:
+            await asyncio.wait_for(existing_message.edit_text(response), timeout=10.0)
+        else:
+            await asyncio.wait_for(update.message.reply_text(response), timeout=10.0)
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout sending reminder confirmation to user {user.get('telegram_id') if user else 'unknown'}")
+        # Try one more time with a simple message
+        try:
+            if not existing_message:
+                await asyncio.wait_for(
+                    update.message.reply_text("⏰ Reminder set (confirmation timed out)"),
+                    timeout=5.0
+                )
+        except Exception as retry_error:
+            logger.error(f"Failed to send even simple confirmation: {retry_error}")
+    except Exception as e:
+        logger.error(f"Error sending reminder confirmation: {e}")
 
     # Save response to conversation history
     if user:
