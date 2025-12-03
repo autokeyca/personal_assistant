@@ -550,6 +550,16 @@ async def handle_todo_complete(update, context, entities, original_message, exis
     import re
     title = re.sub(r'^(the|a|an)\s+', '', title, flags=re.IGNORECASE).strip()
 
+    # Extract task number from phrases like "14 complete", "complete 14", "task 14", etc.
+    # Bug #13 fix: Handle task numbers with extra words
+    task_number_match = re.search(r'\b(\d+)\b', title)
+    if task_number_match and not title.isdigit():
+        # Found a number in the string, but it's not purely a number
+        # Check if it looks like a task completion phrase
+        completion_words = ['complete', 'done', 'finished', 'task', '#']
+        if any(word in title.lower() for word in completion_words):
+            title = task_number_match.group(1)
+
     # Get all pending tasks for this user
     pending_todos = todo_service.list(user_id=user['telegram_id'], include_completed=False)
 
