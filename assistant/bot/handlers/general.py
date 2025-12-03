@@ -72,7 +72,9 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         todo_service = TodoService()
         email_service = EmailService()
 
-        todos = todo_service.list(limit=100)
+        # Get current user's todos only
+        user_id = update.effective_user.id
+        todos = todo_service.list(user_id=user_id, limit=100)
         pending = len([t for t in todos if t["status"] == "pending"])
         in_progress = len([t for t in todos if t["status"] == "in_progress"])
         active_task = todo_service.get_active_task()
@@ -106,8 +108,9 @@ async def briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         calendar_service = CalendarService()
         email_service = EmailService()
 
-        # Get today's data
-        todos = todo_service.list(limit=10)
+        # Get today's data - only current user's todos
+        user_id = update.effective_user.id
+        todos = todo_service.list(user_id=user_id, limit=10)
         due_soon = todo_service.get_due_soon(hours=24)
         events = calendar_service.get_today_events()
         unread = email_service.get_unread(max_results=5)

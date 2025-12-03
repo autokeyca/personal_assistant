@@ -458,12 +458,8 @@ async def handle_todo_add(update, context, entities, original_message, existing_
         list_title = f"{target_user_name}'s Todos"
         response += f"\n\n{format_todo_list(todos, title=list_title)}"
     else:
-        # Task added for self
-        # Owner sees all tasks, regular users see only their own
-        if user['is_owner']:
-            todos = todo_service.list(all_users=True, include_completed=False)
-        else:
-            todos = todo_service.list(user_id=target_user_id, include_completed=False)
+        # Task added for self - show only own todos
+        todos = todo_service.list(user_id=target_user_id, include_completed=False)
         response = f"✅ Added: {todo['title']}"
         if priority and priority != 'medium':
             response += f" ({priority} priority)"
@@ -522,12 +518,10 @@ async def handle_todo_list(update, context, entities, existing_message=None, use
 
     # Get todos
     if show_all:
+        # Explicitly requested all users' todos
         todos = todo_service.list(all_users=True, include_completed=False)
-    elif user['is_owner'] and not user_name:
-        # Owner sees all tasks by default unless asking for specific user
-        todos = todo_service.list(all_users=True, include_completed=False)
-        list_title = "All Todos"
     else:
+        # Show only the specified user's todos (or own todos)
         todos = todo_service.list(user_id=target_user_id, include_completed=False)
 
     response = format_todo_list(todos, title=list_title)
@@ -692,8 +686,8 @@ async def handle_todo_delete(update, context, entities, original_message, existi
         todo_id = todos[0]['id']
         todo_service.delete(todo_id)
 
-        # Show confirmation and list
-        remaining_todos = todo_service.list(include_completed=False)
+        # Show confirmation and list (user's own todos)
+        remaining_todos = todo_service.list(user_id=user['telegram_id'], include_completed=False)
         response = f"🗑️ Deleted: {todos[0]['title']}\n\n{format_todo_list(remaining_todos)}"
     else:
         response = "❌ Could not find matching todo. Try /todo to see your list."
